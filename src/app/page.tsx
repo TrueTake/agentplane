@@ -153,9 +153,9 @@ const features = [
   },
   {
     icon: Globe,
-    title: "MCP connectors",
+    title: "Connectors",
     description:
-      "Connect agents to external tools via Composio. GitHub, Notion, Slack, Firecrawl — one config away.",
+      "Connect agents to 900+ external tools via Composio or add your custom MCP servers.",
   },
   {
     icon: Clock,
