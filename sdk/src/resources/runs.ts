@@ -81,12 +81,18 @@ export class RunsResource {
         }
       }
 
-      // Stream completed normally — fetch final state
+      // Stream ended (normally or connection dropped) — fetch current state.
+      // If the run isn't terminal yet (e.g. stream closed before completion),
+      // fall through to polling.
       runId = runId ?? stream.run_id;
       if (!runId) {
         throw new Error("Stream ended without a run_started event");
       }
-      return await this.get(runId);
+      const run = await this.get(runId);
+      if (TERMINAL_STATUSES.has(run.status)) {
+        return run;
+      }
+      return await this._pollUntilTerminal(runId, signal);
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     }
@@ -172,13 +178,12 @@ export class RunsResource {
         throw signal.reason ?? new Error("Aborted");
       }
 
-      await new Promise((resolve) => setTimeout(resolve, delay));
-
       const run = await this.get(runId);
       if (TERMINAL_STATUSES.has(run.status)) {
         return run;
       }
 
+      await new Promise((resolve) => setTimeout(resolve, delay));
       delay = Math.min(delay * 2, maxDelay);
     }
   }
