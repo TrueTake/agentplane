@@ -19,12 +19,6 @@ function Nav() {
           >
             <Github className="h-5 w-5" />
           </Link>
-          <Link
-            href="/admin"
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-[hsl(240,10%,3.9%)] transition-all hover:bg-white/90"
-          >
-            Dashboard
-          </Link>
         </div>
       </div>
     </nav>
@@ -85,20 +79,14 @@ function Hero() {
         {/* CTAs */}
         <div className="mt-10 flex items-center justify-center gap-4">
           <Link
-            href="/admin"
-            className="group inline-flex h-11 items-center gap-2 rounded-lg bg-white px-6 text-sm font-medium text-[hsl(240,10%,3.9%)] transition-all hover:bg-white/90"
-          >
-            Dashboard
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-          </Link>
-          <Link
             href="https://github.com/getcatalystiq/agentplane"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-11 items-center gap-2 rounded-lg border border-white/[0.12] bg-white/[0.03] px-6 text-sm font-medium text-white transition-all hover:border-white/[0.2] hover:bg-white/[0.06]"
+            className="group inline-flex h-11 items-center gap-2 rounded-lg bg-white px-6 text-sm font-medium text-[hsl(240,10%,3.9%)] transition-all hover:bg-white/90"
           >
             <Github className="h-4 w-4" />
-            GitHub
+            View on GitHub
+            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>
 
@@ -338,10 +326,13 @@ function CTA() {
         </p>
         <div className="mt-10 flex items-center justify-center gap-4">
           <Link
-            href="/admin"
+            href="https://github.com/getcatalystiq/agentplane"
+            target="_blank"
+            rel="noopener noreferrer"
             className="group inline-flex h-12 items-center gap-2 rounded-lg bg-white px-8 text-sm font-medium text-[hsl(240,10%,3.9%)] transition-all hover:bg-white/90"
           >
-            Go to Dashboard
+            <Github className="h-4 w-4" />
+            Get Started
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>
@@ -361,12 +352,6 @@ function Footer() {
         <div className="flex items-center gap-6">
           <Link href="https://github.com/getcatalystiq/agentplane" target="_blank" rel="noopener noreferrer" className="text-xs text-[hsl(240,5%,35%)] hover:text-[hsl(240,5%,65%)]">
             GitHub
-          </Link>
-          <Link href="/api/health" className="text-xs text-[hsl(240,5%,35%)] hover:text-[hsl(240,5%,65%)]">
-            Status
-          </Link>
-          <Link href="/admin" className="text-xs text-[hsl(240,5%,35%)] hover:text-[hsl(240,5%,65%)]">
-            Admin
           </Link>
         </div>
       </div>
