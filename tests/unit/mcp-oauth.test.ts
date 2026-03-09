@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validateMetadataOrigin,
+  getBaseDomain,
   generatePkceChallenge,
 } from "@/lib/mcp-oauth";
 import type { OAuthMetadata } from "@/lib/types";
@@ -11,6 +12,26 @@ const baseMetadata: OAuthMetadata = {
   token_endpoint: "https://mcp.example.com/token",
   response_types_supported: ["code"],
 };
+
+describe("getBaseDomain", () => {
+  it("returns two-label domains as-is", () => {
+    expect(getBaseDomain("example.com")).toBe("example.com");
+  });
+
+  it("extracts base domain from subdomain", () => {
+    expect(getBaseDomain("mcp.example.com")).toBe("example.com");
+    expect(getBaseDomain("mcp-auth.granola.ai")).toBe("granola.ai");
+  });
+
+  it("extracts base domain from deeply nested subdomain", () => {
+    expect(getBaseDomain("a.b.c.example.com")).toBe("example.com");
+  });
+
+  it("handles two-part TLDs", () => {
+    expect(getBaseDomain("mcp.example.co.uk")).toBe("example.co.uk");
+    expect(getBaseDomain("auth.mcp.example.co.uk")).toBe("example.co.uk");
+  });
+});
 
 describe("validateMetadataOrigin", () => {
   it("accepts metadata where all URLs share the same origin", () => {
@@ -29,34 +50,57 @@ describe("validateMetadataOrigin", () => {
     ).not.toThrow();
   });
 
-  it("rejects metadata where token_endpoint has different origin", () => {
+  it("accepts metadata with endpoints on a subdomain of the same base domain", () => {
+    const metadata: OAuthMetadata = {
+      issuer: "https://mcp-auth.granola.ai",
+      authorization_endpoint: "https://mcp-auth.granola.ai/oauth2/authorize",
+      token_endpoint: "https://mcp-auth.granola.ai/oauth2/token",
+      registration_endpoint: "https://mcp-auth.granola.ai/oauth2/register",
+      response_types_supported: ["code"],
+    };
+    expect(() =>
+      validateMetadataOrigin(metadata, "https://mcp.granola.ai"),
+    ).not.toThrow();
+  });
+
+  it("rejects metadata where token_endpoint has different base domain", () => {
     const metadata = {
       ...baseMetadata,
       token_endpoint: "https://evil.com/token",
     };
     expect(() =>
       validateMetadataOrigin(metadata, "https://mcp.example.com"),
-    ).toThrow(/different origin/);
+    ).toThrow(/different base domain/);
   });
 
-  it("rejects metadata where authorization_endpoint has different origin", () => {
+  it("rejects metadata where authorization_endpoint has different base domain", () => {
     const metadata = {
       ...baseMetadata,
       authorization_endpoint: "https://evil.com/authorize",
     };
     expect(() =>
       validateMetadataOrigin(metadata, "https://mcp.example.com"),
-    ).toThrow(/different origin/);
+    ).toThrow(/different base domain/);
   });
 
-  it("rejects metadata where registration_endpoint has different origin", () => {
+  it("rejects metadata where registration_endpoint has different base domain", () => {
     const metadata = {
       ...baseMetadata,
       registration_endpoint: "https://evil.com/register",
     };
     expect(() =>
       validateMetadataOrigin(metadata, "https://mcp.example.com"),
-    ).toThrow(/different origin/);
+    ).toThrow(/different base domain/);
+  });
+
+  it("rejects metadata with HTTP endpoint URL", () => {
+    const metadata = {
+      ...baseMetadata,
+      token_endpoint: "http://mcp.example.com/token",
+    };
+    expect(() =>
+      validateMetadataOrigin(metadata, "https://mcp.example.com"),
+    ).toThrow(/must use HTTPS/);
   });
 
   it("ignores undefined registration_endpoint", () => {

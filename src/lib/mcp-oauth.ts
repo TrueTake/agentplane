@@ -87,10 +87,34 @@ export async function safeFetch(
 }
 
 /**
- * Validate that all URL fields in OAuth metadata share the same origin as base_url.
+ * Extract the registrable base domain from a hostname.
+ * e.g. "mcp-auth.granola.ai" → "granola.ai", "mcp.example.com" → "example.com"
+ *
+ * Uses a simple heuristic: the last two labels (or three for known two-part TLDs
+ * like .co.uk). This covers the vast majority of real-world MCP server domains.
+ */
+export function getBaseDomain(hostname: string): string {
+  const parts = hostname.split(".");
+  if (parts.length <= 2) return hostname;
+
+  // Common two-part TLDs where the registrable domain has 3 labels
+  const twoPart = ["co.uk", "co.jp", "com.au", "com.br", "co.in", "co.nz", "co.za"];
+  const lastTwo = parts.slice(-2).join(".");
+  if (twoPart.includes(lastTwo)) {
+    return parts.slice(-3).join(".");
+  }
+
+  return parts.slice(-2).join(".");
+}
+
+/**
+ * Validate that all URL fields in OAuth metadata share the same base domain as base_url.
+ * Allows subdomains of the same registrable domain (e.g. mcp-auth.granola.ai ↔ mcp.granola.ai).
  */
 export function validateMetadataOrigin(metadata: OAuthMetadata, baseUrl: string): void {
-  const baseOrigin = new URL(baseUrl).origin;
+  const baseParsed = new URL(baseUrl);
+  const baseDomain = getBaseDomain(baseParsed.hostname);
+
   const urlFields = [
     metadata.authorization_endpoint,
     metadata.token_endpoint,
@@ -98,10 +122,15 @@ export function validateMetadataOrigin(metadata: OAuthMetadata, baseUrl: string)
   ].filter(Boolean) as string[];
 
   for (const url of urlFields) {
-    const origin = new URL(url).origin;
-    if (origin !== baseOrigin) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
       throw new ValidationError(
-        `OAuth metadata URL ${url} has different origin than base_url ${baseUrl}`,
+        `OAuth metadata URL ${url} must use HTTPS`,
+      );
+    }
+    if (getBaseDomain(parsed.hostname) !== baseDomain) {
+      throw new ValidationError(
+        `OAuth metadata URL ${url} has different base domain than base_url ${baseUrl}`,
       );
     }
   }
