@@ -263,6 +263,7 @@ function ScheduleCard({
               const newFreq = e.target.value as ScheduleFrequency;
               setFrequency(newFreq);
               if (newFreq === "manual") setEnabled(false);
+              else setEnabled(true);
             }}
             disabled={busy}
           >
