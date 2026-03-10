@@ -129,6 +129,7 @@ describe("createSession", () => {
   it("throws ConcurrencyLimitError when max sessions reached", async () => {
     mockTx.queryOne
       .mockResolvedValueOnce(mockAgent)
+      .mockResolvedValueOnce({ status: "active", monthly_budget_usd: 100, current_month_spend: 0 })
       .mockResolvedValueOnce(null); // INSERT returns null = limit reached
     await expect(createSession(tenantId, agentId)).rejects.toThrow(ConcurrencyLimitError);
   });
@@ -136,10 +137,12 @@ describe("createSession", () => {
   it("returns session and agent on success", async () => {
     mockTx.queryOne
       .mockResolvedValueOnce(mockAgent)
+      .mockResolvedValueOnce({ status: "active", monthly_budget_usd: 100, current_month_spend: 0 })
       .mockResolvedValueOnce(mockSession);
     const result = await createSession(tenantId, agentId);
     expect(result.session).toEqual(mockSession);
     expect(result.agent).toEqual(mockAgent);
+    expect(result.remainingBudget).toBe(100);
   });
 });
 

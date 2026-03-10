@@ -14,14 +14,14 @@ import {
   type Session,
 } from "@/lib/sessions";
 import { uploadTranscript } from "@/lib/transcripts";
-import { backupSessionFile } from "@/lib/session-files";
-import { restoreSessionFile } from "@/lib/session-files";
-import { processLineAssets } from "@/lib/assets";
+import { backupSessionFile, restoreSessionFile } from "@/lib/session-files";
 import { generateRunToken } from "@/lib/crypto";
+import { parseResultEvent, captureTranscript } from "@/lib/transcript-utils";
+import { createNdjsonStream, ndjsonHeaders } from "@/lib/streaming";
 import { logger } from "@/lib/logger";
 import { getEnv } from "@/lib/env";
 import type { AgentInternal } from "@/lib/validation";
-import type { RunId, RunStatus, TenantId, SessionId, AgentId } from "@/lib/types";
+import type { RunId, RunStatus, TenantId, AgentId } from "@/lib/types";
 
 export interface SessionExecutionParams {
   sessionId: string;
@@ -41,7 +41,6 @@ export interface SessionMessageResult {
   sdkSessionIdRef: { value: string | null };
 }
 
-const MAX_TRANSCRIPT_EVENTS = 10_000;
 const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
@@ -54,7 +53,8 @@ export async function prepareSessionSandbox(
 ): Promise<SessionSandboxInstance> {
   const env = getEnv();
 
-  // Build sandbox config (needed for both hot and cold path)
+  // Build MCP + plugin config (process-level cache with 5-min TTL makes
+  // repeated hot-path calls cheap while keeping tokens fresh)
   const [mcpResult, pluginResult] = await Promise.all([
     buildMcpConfig(params.agent, params.tenantId),
     fetchPluginContent(params.agent.plugins ?? []),
@@ -87,7 +87,6 @@ export async function prepareSessionSandbox(
   if (session.sandbox_id) {
     const sandbox = await reconnectSessionSandbox(session.sandbox_id, sandboxConfig);
     if (sandbox) {
-      // Extend timeout on each message
       await sandbox.extendTimeout(DEFAULT_SESSION_TIMEOUT_MS);
       logger.info("Session sandbox reconnected (hot path)", {
         session_id: params.sessionId,
@@ -131,31 +130,44 @@ export async function executeSessionMessage(
     params.tenantId,
     params.agent.id as AgentId,
     params.prompt,
-    { triggeredBy: "chat" },
+    { triggeredBy: "chat", sessionId: params.sessionId },
   );
   const runId = run.id as RunId;
 
   const runToken = await generateRunToken(runId, env.ENCRYPTION_KEY);
 
-  // Transition session to active
-  const fromStatus = session.status as "creating" | "idle";
-  await transitionSessionStatus(
-    params.sessionId,
-    params.tenantId,
-    fromStatus,
-    "active",
-    { idle_since: null },
-  );
+  // NOTE: session must already be in "active" state — the route handler
+  // claims the lock atomically (WHERE status = fromStatus) before calling
+  // this function, preventing concurrent message races.
 
   // Start the runner in the sandbox
-  const { logs } = await sandbox.runMessage({
-    prompt: params.prompt,
-    sdkSessionId: session.sdk_session_id,
-    runId,
-    runToken,
-    maxTurns: params.effectiveMaxTurns,
-    maxBudgetUsd: params.effectiveBudget,
-  });
+  let logs: () => AsyncIterable<string>;
+  try {
+    const result = await sandbox.runMessage({
+      prompt: params.prompt,
+      sdkSessionId: session.sdk_session_id,
+      runId,
+      runToken,
+      maxTurns: params.effectiveMaxTurns,
+      maxBudgetUsd: params.effectiveBudget,
+    });
+    logs = result.logs;
+  } catch (err) {
+    // Rollback session to idle so user can retry immediately
+    await transitionSessionStatus(
+      params.sessionId,
+      params.tenantId,
+      "active",
+      "idle",
+      { idle_since: new Date().toISOString() },
+    ).catch((rollbackErr) => {
+      logger.error("Failed to rollback session to idle after runMessage failure", {
+        session_id: params.sessionId,
+        error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+      });
+    });
+    throw err;
+  }
 
   // Transition run to running
   await transitionRunStatus(runId, params.tenantId, "pending", "running", {
@@ -166,12 +178,20 @@ export async function executeSessionMessage(
   // Capture transcript and session_info events
   const transcriptChunks: string[] = [];
   const sdkSessionIdRef = { value: session.sdk_session_id };
-  const logIterator = captureSessionTranscript(
+  const logIterator = captureTranscript(
     logs(),
     transcriptChunks,
     params.tenantId,
     runId,
-    sdkSessionIdRef,
+    (event) => {
+      if (event.type === "session_info" && event.sdk_session_id) {
+        sdkSessionIdRef.value = event.sdk_session_id as string;
+        logger.info("Captured SDK session ID", {
+          run_id: runId,
+          sdk_session_id: event.sdk_session_id,
+        });
+      }
+    },
   );
 
   return { runId, sandbox, logIterator, transcriptChunks, sdkSessionIdRef };
@@ -226,6 +246,13 @@ export async function finalizeSessionMessage(
         sessionId,
         sdkSessionId,
       );
+      if (!sessionBlobUrl) {
+        logger.error("Session file backup failed — cold start will lose context since last successful backup", {
+          run_id: runId,
+          session_id: sessionId,
+          sdk_session_id: sdkSessionId,
+        });
+      }
     }
 
     // 4. Transition session to idle
@@ -253,7 +280,13 @@ export async function finalizeSessionMessage(
       completed_at: new Date().toISOString(),
       error_type: "session_finalize_error",
       error_messages: [err instanceof Error ? err.message : String(err)],
-    }).catch(() => {});
+    }).catch((inner) => {
+      logger.error("Best-effort run status transition failed during finalize error recovery", {
+        run_id: runId,
+        session_id: sessionId,
+        error: inner instanceof Error ? inner.message : String(inner),
+      });
+    });
 
     // Best-effort: transition session to idle even on error
     await transitionSessionStatus(
@@ -262,109 +295,81 @@ export async function finalizeSessionMessage(
       "active",
       "idle",
       { idle_since: new Date().toISOString() },
-    ).catch(() => {});
+    ).catch((inner) => {
+      logger.error("Best-effort session status transition failed during finalize error recovery", {
+        run_id: runId,
+        session_id: sessionId,
+        error: inner instanceof Error ? inner.message : String(inner),
+      });
+    });
   }
 }
 
-async function* captureSessionTranscript(
-  source: AsyncIterable<string>,
-  chunks: string[],
+/**
+ * Create a streaming Response for a session message.
+ * Wraps the log iterator with finalization and detach handling.
+ * Used by all 4 session route handlers (tenant/admin × create/message).
+ */
+export function createSessionStreamResponse(
+  result: SessionMessageResult,
   tenantId: TenantId,
-  runId: RunId,
-  sdkSessionIdRef: { value: string | null },
-): AsyncGenerator<string> {
-  let truncated = false;
-  for await (const line of source) {
-    const trimmed = line.trim();
-    if (!trimmed) {
+  sessionId: string,
+  effectiveBudget: number,
+  options?: {
+    /** Extra events to yield before the log stream (e.g. session_created). */
+    prelude?: string[];
+  },
+): Response {
+  const { runId, sandbox, logIterator, transcriptChunks, sdkSessionIdRef } = result;
+  let detached = false;
+
+  async function* streamWithFinalize() {
+    if (options?.prelude) {
+      for (const line of options.prelude) {
+        yield line;
+      }
+    }
+
+    for await (const line of logIterator) {
       yield line;
-      continue;
     }
 
-    // Check for session_info events to capture SDK session ID
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed.type === "session_info" && parsed.sdk_session_id) {
-        sdkSessionIdRef.value = parsed.sdk_session_id;
-        logger.info("Captured SDK session ID", {
+    if (!detached) {
+      await finalizeSessionMessage(
+        runId,
+        tenantId,
+        sessionId,
+        transcriptChunks,
+        effectiveBudget,
+        sandbox,
+        sdkSessionIdRef.value,
+      );
+    }
+  }
+
+  const stream = createNdjsonStream({
+    runId,
+    logIterator: streamWithFinalize(),
+    onDetach: () => {
+      detached = true;
+      logger.info("Session stream detached", { session_id: sessionId, run_id: runId });
+      finalizeSessionMessage(
+        runId,
+        tenantId,
+        sessionId,
+        transcriptChunks,
+        effectiveBudget,
+        sandbox,
+        sdkSessionIdRef.value,
+      ).catch((err) => {
+        logger.error("Detached session finalization failed", {
+          session_id: sessionId,
           run_id: runId,
-          sdk_session_id: parsed.sdk_session_id,
+          error: err instanceof Error ? err.message : String(err),
         });
-      }
-    } catch {
-      // Not JSON, continue
-    }
+      });
+    },
+  });
 
-    if (truncated) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed.type === "result" || parsed.type === "error") {
-          const processed = await processLineAssets(trimmed, tenantId, runId);
-          chunks.push(processed);
-          yield processed;
-          continue;
-        }
-      } catch {
-        // Not JSON
-      }
-      yield trimmed;
-    } else {
-      const processed = await processLineAssets(trimmed, tenantId, runId);
-      const isTextDelta = (() => {
-        try { return JSON.parse(processed).type === "text_delta"; } catch { return false; }
-      })();
-      if (isTextDelta) {
-        yield processed;
-        continue;
-      }
-      if (chunks.length < MAX_TRANSCRIPT_EVENTS) {
-        chunks.push(processed);
-      } else {
-        truncated = true;
-        chunks.push(JSON.stringify({ type: "system", message: `Transcript truncated at ${MAX_TRANSCRIPT_EVENTS} events` }));
-        logger.warn("Session transcript truncated", { run_id: runId, max: MAX_TRANSCRIPT_EVENTS });
-      }
-      yield processed;
-    }
-  }
-}
-
-function parseResultEvent(line: string): {
-  status: RunStatus;
-  updates: Record<string, unknown>;
-} | null {
-  try {
-    const event = JSON.parse(line);
-    if (event.type === "result") {
-      const status: RunStatus =
-        event.subtype === "success" ? "completed" : "failed";
-      return {
-        status,
-        updates: {
-          result_summary: event.subtype,
-          cost_usd: event.total_cost_usd,
-          num_turns: event.num_turns,
-          duration_ms: event.duration_ms,
-          duration_api_ms: event.duration_api_ms,
-          total_input_tokens: event.usage?.input_tokens,
-          total_output_tokens: event.usage?.output_tokens,
-          cache_read_tokens: event.usage?.cache_read_input_tokens,
-          cache_creation_tokens: event.usage?.cache_creation_input_tokens,
-          model_usage: event.modelUsage,
-        },
-      };
-    }
-    if (event.type === "error") {
-      return {
-        status: "failed",
-        updates: {
-          error_type: event.code || "execution_error",
-          error_messages: [event.error],
-        },
-      };
-    }
-  } catch {
-    // Not valid JSON
-  }
-  return null;
+  return new Response(stream, { status: 200, headers: ndjsonHeaders() });
 }

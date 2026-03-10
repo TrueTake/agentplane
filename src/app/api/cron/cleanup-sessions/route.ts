@@ -3,6 +3,7 @@ import { withErrorHandler, jsonResponse } from "@/lib/api";
 import { execute } from "@/db";
 import { reconnectSandbox } from "@/lib/sandbox";
 import { getIdleSessions, getStuckSessions } from "@/lib/sessions";
+import { deleteSessionFile } from "@/lib/session-files";
 import { logger } from "@/lib/logger";
 import { verifyCronSecret } from "@/lib/cron-auth";
 import type { TenantId } from "@/lib/types";
@@ -47,6 +48,11 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         }
       }
 
+      // Delete session file backup from Vercel Blob
+      if (session.session_blob_url) {
+        await deleteSessionFile(session.session_blob_url);
+      }
+
       cleaned++;
       logger.info("Idle session cleaned up", {
         session_id: session.id,
@@ -77,9 +83,18 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
         try {
           const sandbox = await reconnectSandbox(session.sandbox_id);
           if (sandbox) await sandbox.stop();
-        } catch {
-          // Best effort
+        } catch (err) {
+          logger.warn("Failed to stop stuck session sandbox", {
+            session_id: session.id,
+            sandbox_id: session.sandbox_id,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
+      }
+
+      // Delete session file backup from Vercel Blob
+      if (session.session_blob_url) {
+        await deleteSessionFile(session.session_blob_url);
       }
 
       cleaned++;

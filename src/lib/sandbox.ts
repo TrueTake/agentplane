@@ -322,12 +322,13 @@ export interface SessionSandboxInstance extends SandboxInstance {
     maxBudgetUsd: number;
   }): Promise<{ logs: () => AsyncIterable<string> }>;
   extendTimeout(ms: number): Promise<void>;
-  writeSessionFile(content: Buffer): Promise<void>;
-  readSessionFile(): Promise<Buffer | null>;
+  writeSessionFile(sdkSessionId: string, content: Buffer): Promise<void>;
+  readSessionFile(sdkSessionId: string): Promise<Buffer | null>;
 }
 
 const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const SESSION_FILE_PATH = "/vercel/sandbox/.claude/session.jsonl";
+// SDK stores session files at this path (must match session-files.ts SESSION_FILE_DIR)
+const SESSION_FILE_DIR = "/vercel/sandbox/.claude/projects/vercel/sandbox";
 
 export async function createSessionSandbox(config: SessionSandboxConfig): Promise<SessionSandboxInstance> {
   const sourceConfig = config.agent.git_repo_url
@@ -406,6 +407,7 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
       exitCode: installCmd.exitCode,
       stderr: installErrors.slice(0, 1000),
     });
+    throw new Error(`SDK install failed in session sandbox (exit code ${installCmd.exitCode}): ${installErrors.slice(0, 500)}`);
   }
 
   logger.info("Session sandbox created", {
@@ -431,6 +433,17 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
     baseEnv.MCP_SERVERS_JSON = JSON.stringify(config.mcpServers);
   }
 
+  return buildSessionSandboxInstance(sandbox, config, baseEnv, !!hasMcp, hasSkills, hasPluginContent);
+}
+
+function buildSessionSandboxInstance(
+  sandbox: Sandbox,
+  config: SessionSandboxConfig,
+  baseEnv: Record<string, string>,
+  hasMcp: boolean,
+  hasSkills: boolean,
+  hasPluginContent: boolean,
+): SessionSandboxInstance {
   return {
     id: sandbox.sandboxId,
     sandboxRef: sandbox,
@@ -449,19 +462,24 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
       try {
         await sandbox.extendTimeout(ms);
       } catch (err) {
-        logger.warn("Failed to extend sandbox timeout", {
+        logger.error("Failed to extend sandbox timeout", {
           sandbox_id: sandbox.sandboxId,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     },
-    writeSessionFile: async (content: Buffer) => {
-      await sandbox.writeFiles([{ path: SESSION_FILE_PATH, content }]);
+    writeSessionFile: async (sdkSessionId: string, content: Buffer) => {
+      await sandbox.writeFiles([{ path: `${SESSION_FILE_DIR}/${sdkSessionId}.jsonl`, content }]);
     },
-    readSessionFile: async () => {
+    readSessionFile: async (sdkSessionId: string) => {
       try {
-        return await sandbox.readFileToBuffer({ path: SESSION_FILE_PATH });
-      } catch {
+        return await sandbox.readFileToBuffer({ path: `${SESSION_FILE_DIR}/${sdkSessionId}.jsonl` });
+      } catch (err) {
+        logger.warn("Failed to read session file from sandbox", {
+          sandbox_id: sandbox.sandboxId,
+          sdk_session_id: sdkSessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return null;
       }
     },
@@ -627,9 +645,17 @@ export async function reconnectSessionSandbox(
   sandboxId: string,
   config: SessionSandboxConfig,
 ): Promise<SessionSandboxInstance | null> {
+  // Step 1: Try to reconnect — if sandbox is gone, return null
+  let sandbox: Sandbox;
   try {
-    const sandbox = await Sandbox.get({ sandboxId });
+    sandbox = await Sandbox.get({ sandboxId });
+  } catch {
+    // Sandbox truly gone — expected "not found" case
+    return null;
+  }
 
+  // Step 2: Build config — errors here should NOT be silently swallowed
+  try {
     const hasMcp = config.mcpServers && Object.keys(config.mcpServers).length > 0;
     const hasSkills = config.agent.skills.length > 0;
     const hasPluginContent = (config.pluginFiles ?? []).length > 0;
@@ -647,76 +673,12 @@ export async function reconnectSessionSandbox(
       baseEnv.MCP_SERVERS_JSON = JSON.stringify(config.mcpServers);
     }
 
-    return {
-      id: sandbox.sandboxId,
-      sandboxRef: sandbox,
-      stop: async () => {
-        try {
-          await sandbox.stop();
-        } catch (err) {
-          logger.warn("Failed to stop session sandbox", {
-            sandbox_id: sandbox.sandboxId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
-      logs: () => ({ [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true as const, value: "" }) }) }),
-      extendTimeout: async (ms: number) => {
-        try {
-          await sandbox.extendTimeout(ms);
-        } catch (err) {
-          logger.warn("Failed to extend sandbox timeout", {
-            sandbox_id: sandbox.sandboxId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
-      writeSessionFile: async (content: Buffer) => {
-        await sandbox.writeFiles([{ path: SESSION_FILE_PATH, content }]);
-      },
-      readSessionFile: async () => {
-        try {
-          return await sandbox.readFileToBuffer({ path: SESSION_FILE_PATH });
-        } catch {
-          return null;
-        }
-      },
-      runMessage: async (opts) => {
-        const runnerScript = buildSessionRunnerScript({
-          agent: config.agent,
-          prompt: opts.prompt,
-          sdkSessionId: opts.sdkSessionId,
-          maxTurns: opts.maxTurns,
-          maxBudgetUsd: opts.maxBudgetUsd,
-          hasSkillsOrPlugins: hasSkills || hasPluginContent,
-          hasMcp: !!hasMcp,
-          mcpErrors: config.mcpErrors ?? [],
-        });
-
-        const runnerFilename = `runner-${opts.runId}.mjs`;
-        await sandbox.writeFiles([
-          { path: `/vercel/sandbox/${runnerFilename}`, content: Buffer.from(runnerScript) },
-        ]);
-
-        const env = {
-          ...baseEnv,
-          AGENTPLANE_RUN_ID: opts.runId,
-          AGENTPLANE_RUN_TOKEN: opts.runToken,
-        };
-
-        const command = await sandbox.runCommand({
-          cmd: "node",
-          args: [runnerFilename],
-          env,
-          detached: true,
-        });
-
-        return {
-          logs: () => streamLogs(command),
-        };
-      },
-    };
-  } catch {
-    return null;
+    return buildSessionSandboxInstance(sandbox, config, baseEnv, !!hasMcp, hasSkills, hasPluginContent);
+  } catch (err) {
+    logger.error("Failed to build session sandbox config after reconnect", {
+      sandbox_id: sandboxId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
 }

@@ -1,7 +1,7 @@
-import { put, del } from "@vercel/blob";
+import { put, del, get } from "@vercel/blob";
 import type { SessionSandboxInstance } from "./sandbox";
 import { logger } from "./logger";
-import type { TenantId, SessionId } from "./types";
+import type { TenantId } from "./types";
 
 // SDK stores session files at this path inside the sandbox
 const SESSION_FILE_DIR = "/vercel/sandbox/.claude/projects/vercel/sandbox";
@@ -23,7 +23,7 @@ export async function backupSessionFile(
   const sessionFilePath = `${SESSION_FILE_DIR}/${sdkSessionId}.jsonl`;
 
   try {
-    const content = await sandbox.readSessionFile();
+    const content = await sandbox.readSessionFile(sdkSessionId);
     if (!content || content.length === 0) {
       logger.warn("Session file empty or not found", {
         session_id: sessionId,
@@ -35,7 +35,7 @@ export async function backupSessionFile(
 
     const blobPath = `sessions/${tenantId}/${sessionId}/${sdkSessionId}.jsonl`;
     const blob = await put(blobPath, content, {
-      access: "public",
+      access: "private",
       contentType: "application/x-ndjson",
       addRandomSuffix: false,
       multipart: true,
@@ -70,12 +70,12 @@ export async function restoreSessionFile(
   sdkSessionId: string,
 ): Promise<void> {
   try {
-    const response = await fetch(blobUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch session file: ${response.status}`);
+    const result = await get(blobUrl, { access: "private" });
+    if (!result) {
+      throw new Error("Session file not found in blob storage");
     }
 
-    const content = Buffer.from(await response.arrayBuffer());
+    const content = Buffer.from(await new Response(result.stream).arrayBuffer());
     const sessionFilePath = `${SESSION_FILE_DIR}/${sdkSessionId}.jsonl`;
 
     await sandbox.sandboxRef.writeFiles([

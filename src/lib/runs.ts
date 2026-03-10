@@ -14,6 +14,37 @@ import { VALID_TRANSITIONS } from "./types";
 
 const MAX_CONCURRENT_RUNS = 10;
 
+const TenantBudgetRow = z.object({
+  status: z.enum(["active", "suspended"]),
+  monthly_budget_usd: z.coerce.number(),
+  current_month_spend: z.coerce.number(),
+});
+
+/**
+ * Check tenant suspension status and budget within a transaction.
+ * Throws ForbiddenError if suspended, BudgetExceededError if over budget.
+ * Returns remaining budget in USD.
+ */
+export async function checkTenantBudget(
+  tx: { queryOne: <T>(schema: z.ZodSchema<T>, sql: string, params?: unknown[]) => Promise<T | null> },
+  tenantId: TenantId,
+): Promise<number> {
+  const row = await tx.queryOne(
+    TenantBudgetRow,
+    "SELECT status, monthly_budget_usd, current_month_spend FROM tenants WHERE id = $1",
+    [tenantId],
+  );
+  if (row?.status === "suspended") {
+    throw new ForbiddenError("Tenant is suspended");
+  }
+  if (row && row.current_month_spend >= row.monthly_budget_usd) {
+    throw new BudgetExceededError(
+      `Monthly budget of $${row.monthly_budget_usd} exceeded (spent: $${row.current_month_spend.toFixed(2)})`,
+    );
+  }
+  return row ? row.monthly_budget_usd - row.current_month_spend : Infinity;
+}
+
 const BILLABLE_TERMINAL_STATUSES: RunStatus[] = [
   "completed",
   "failed",
@@ -26,7 +57,7 @@ export async function createRun(
   tenantId: TenantId,
   agentId: AgentId,
   prompt: string,
-  options?: { triggeredBy?: RunTriggeredBy; scheduleId?: ScheduleId },
+  options?: { triggeredBy?: RunTriggeredBy; scheduleId?: ScheduleId; sessionId?: string },
 ): Promise<{ run: z.infer<typeof RunRow>; agent: AgentInternal; remainingBudget: number }> {
   return withTenantTransaction(tenantId, async (tx) => {
     // Load agent (including internal Composio MCP cache fields)
@@ -37,39 +68,20 @@ export async function createRun(
     );
     if (!agent) throw new NotFoundError("Agent not found");
 
-    // Check tenant status and budget
-    const budgetRow = await tx.queryOne(
-      z.object({
-        status: z.enum(["active", "suspended"]),
-        monthly_budget_usd: z.coerce.number(),
-        current_month_spend: z.coerce.number(),
-      }),
-      "SELECT status, monthly_budget_usd, current_month_spend FROM tenants WHERE id = $1",
-      [tenantId],
-    );
-    if (budgetRow?.status === "suspended") {
-      throw new ForbiddenError("Tenant is suspended");
-    }
-    if (budgetRow && budgetRow.current_month_spend >= budgetRow.monthly_budget_usd) {
-      throw new BudgetExceededError(
-        `Monthly budget of $${budgetRow.monthly_budget_usd} exceeded (spent: $${budgetRow.current_month_spend.toFixed(2)})`,
-      );
-    }
-    const remainingBudget = budgetRow
-      ? budgetRow.monthly_budget_usd - budgetRow.current_month_spend
-      : Infinity;
+    const remainingBudget = await checkTenantBudget(tx, tenantId);
 
     // Atomic insert with concurrent run limit check
     const runId = generateId();
     const triggeredBy = options?.triggeredBy ?? "api";
     const scheduleId = options?.scheduleId ?? null;
+    const sessionId = options?.sessionId ?? null;
     const inserted = await tx.queryOne(
       RunRow,
-      `INSERT INTO runs (id, agent_id, tenant_id, status, prompt, triggered_by, schedule_id, created_at)
-       SELECT $1, $2, $3, 'pending', $4, $5, $6, NOW()
-       WHERE (SELECT COUNT(*) FROM runs WHERE tenant_id = $3 AND status IN ('pending', 'running')) < $7
+      `INSERT INTO runs (id, agent_id, tenant_id, status, prompt, triggered_by, schedule_id, session_id, created_at)
+       SELECT $1, $2, $3, 'pending', $4, $5, $6, $7, NOW()
+       WHERE (SELECT COUNT(*) FROM runs WHERE tenant_id = $3 AND status IN ('pending', 'running')) < $8
        RETURNING *`,
-      [runId, agentId, tenantId, prompt, triggeredBy, scheduleId, MAX_CONCURRENT_RUNS],
+      [runId, agentId, tenantId, prompt, triggeredBy, scheduleId, sessionId, MAX_CONCURRENT_RUNS],
     );
 
     if (!inserted) {

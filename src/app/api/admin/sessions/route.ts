@@ -3,8 +3,7 @@ import { query, queryOne } from "@/db";
 import { PaginationSchema, SessionStatusSchema, AgentRowInternal } from "@/lib/validation";
 import { withErrorHandler, jsonResponse } from "@/lib/api";
 import { createSession, transitionSessionStatus } from "@/lib/sessions";
-import { prepareSessionSandbox, executeSessionMessage, finalizeSessionMessage } from "@/lib/session-executor";
-import { createNdjsonStream, ndjsonHeaders } from "@/lib/streaming";
+import { prepareSessionSandbox, executeSessionMessage, createSessionStreamResponse } from "@/lib/session-executor";
 import { NotFoundError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
@@ -96,20 +95,35 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const agent = agentRow;
 
   const tenantId = agent.tenant_id as TenantId;
-  const { session } = await createSession(tenantId, input.agent_id as AgentId);
+  const { session, remainingBudget } = await createSession(tenantId, input.agent_id as AgentId);
 
-  const sandbox = await prepareSessionSandbox(
-    {
-      sessionId: session.id,
-      tenantId,
-      agent,
-      prompt: input.prompt ?? "",
-      platformApiUrl: new URL(request.url).origin,
-      effectiveBudget: agent.max_budget_usd,
-      effectiveMaxTurns: agent.max_turns,
-    },
-    session,
-  );
+  const effectiveBudget = Math.min(agent.max_budget_usd, remainingBudget);
+
+  let sandbox: Awaited<ReturnType<typeof prepareSessionSandbox>>;
+  try {
+    sandbox = await prepareSessionSandbox(
+      {
+        sessionId: session.id,
+        tenantId,
+        agent,
+        prompt: input.prompt ?? "",
+        platformApiUrl: new URL(request.url).origin,
+        effectiveBudget,
+        effectiveMaxTurns: agent.max_turns,
+      },
+      session,
+    );
+  } catch (err) {
+    await transitionSessionStatus(session.id, tenantId, "creating", "stopped", {
+      idle_since: null,
+    }).catch((transErr) => {
+      logger.error("Failed to transition session to stopped after sandbox failure", {
+        session_id: session.id,
+        error: transErr instanceof Error ? transErr.message : String(transErr),
+      });
+    });
+    throw err;
+  }
 
   if (!input.prompt) {
     await transitionSessionStatus(session.id, tenantId, "creating", "idle", {
@@ -127,59 +141,31 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     }, 201);
   }
 
-  const { runId, logIterator, transcriptChunks, sdkSessionIdRef } =
-    await executeSessionMessage(
-      {
-        sessionId: session.id,
-        tenantId,
-        agent,
-        prompt: input.prompt,
-        platformApiUrl: new URL(request.url).origin,
-        effectiveBudget: agent.max_budget_usd,
-        effectiveMaxTurns: agent.max_turns,
-      },
-      sandbox,
-      { ...session, sandbox_id: sandbox.id },
-    );
+  // Transition creating → active before executing message
+  await transitionSessionStatus(session.id, tenantId, "creating", "active", {
+    idle_since: null,
+  });
 
-  let detached = false;
+  const result = await executeSessionMessage(
+    {
+      sessionId: session.id,
+      tenantId,
+      agent,
+      prompt: input.prompt,
+      platformApiUrl: new URL(request.url).origin,
+      effectiveBudget,
+      effectiveMaxTurns: agent.max_turns,
+    },
+    sandbox,
+    { ...session, sandbox_id: sandbox.id },
+  );
 
-  async function* streamWithFinalize() {
-    yield JSON.stringify({
+  return createSessionStreamResponse(result, tenantId, session.id, effectiveBudget, {
+    prelude: [JSON.stringify({
       type: "session_created",
       session_id: session.id,
       agent_id: session.agent_id,
       timestamp: new Date().toISOString(),
-    });
-
-    for await (const line of logIterator) {
-      yield line;
-    }
-
-    if (!detached) {
-      await finalizeSessionMessage(
-        runId,
-        tenantId,
-        session.id,
-        transcriptChunks,
-        agent.max_budget_usd,
-        sandbox,
-        sdkSessionIdRef.value,
-      );
-    }
-  }
-
-  const stream = createNdjsonStream({
-    runId,
-    logIterator: streamWithFinalize(),
-    onDetach: () => {
-      detached = true;
-      logger.info("Admin session stream detached", {
-        session_id: session.id,
-        run_id: runId,
-      });
-    },
+    })],
   });
-
-  return new Response(stream, { status: 200, headers: ndjsonHeaders() });
 });

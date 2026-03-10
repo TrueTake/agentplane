@@ -8,8 +8,7 @@ import type {
   PaginatedResponse,
   StreamEvent,
 } from "../types";
-import { narrowStreamEvent } from "../types";
-import { RunStream, parseNdjsonStream } from "../streaming";
+import { RunStream } from "../streaming";
 
 export class SessionsResource {
   constructor(private readonly _client: AgentPlane) {}

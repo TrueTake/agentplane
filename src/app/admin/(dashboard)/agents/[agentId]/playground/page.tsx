@@ -220,6 +220,7 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runIdRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -229,6 +230,13 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [events, streamingText]);
+
+  // Cleanup AbortController on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   async function reconnectToStream(runId: string, eventOffset: number) {
     setPolling(true);
@@ -387,6 +395,7 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
 
             // Capture session ID from session_created event
             if (event.type === "session_created" && event.session_id) {
+              sessionIdRef.current = event.session_id as string;
               setSessionId(event.session_id as string);
             }
 
@@ -445,9 +454,10 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
     try {
       let res: Response;
 
-      if (sessionId) {
+      const currentSessionId = sessionIdRef.current;
+      if (currentSessionId) {
         // Follow-up message to existing session
-        res = await fetch(`/api/admin/sessions/${sessionId}/messages`, {
+        res = await fetch(`/api/admin/sessions/${currentSessionId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: messageText }),
@@ -481,14 +491,17 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
       runIdRef.current = null;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prompt, running, sessionId, agentId]);
+  }, [prompt, running, agentId]);
 
   function handleNewChat() {
     abortRef.current?.abort();
     // Stop the current session in the background
     if (sessionId) {
-      fetch(`/api/admin/sessions/${sessionId}`, { method: "DELETE" }).catch(() => {});
+      fetch(`/api/admin/sessions/${sessionId}`, { method: "DELETE" }).catch((err) => {
+        console.error("Failed to stop session:", err);
+      });
     }
+    sessionIdRef.current = null;
     setSessionId(null);
     setEvents([]);
     setStreamingText("");
@@ -506,7 +519,9 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
     const id = runIdRef.current;
     if (id) {
       runIdRef.current = null;
-      fetch(`/api/admin/runs/${id}/cancel`, { method: "POST" }).catch(() => {});
+      fetch(`/api/admin/runs/${id}/cancel`, { method: "POST" }).catch((err) => {
+        console.error("Failed to cancel run:", err);
+      });
     }
   }
 

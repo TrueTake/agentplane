@@ -4,6 +4,7 @@ import { withErrorHandler } from "@/lib/api";
 import { SessionRow, RunRow } from "@/lib/validation";
 import { stopSession } from "@/lib/sessions";
 import { reconnectSandbox } from "@/lib/sandbox";
+import { NotFoundError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import type { TenantId } from "@/lib/types";
 
@@ -18,9 +19,7 @@ export const GET = withErrorHandler(async (request: NextRequest, context) => {
     "SELECT * FROM sessions WHERE id = $1",
     [sessionId],
   );
-  if (!session) {
-    return NextResponse.json({ error: { code: "not_found", message: "Session not found" } }, { status: 404 });
-  }
+  if (!session) throw new NotFoundError("Session not found");
 
   // Get session runs
   const runs = await query(
@@ -40,9 +39,7 @@ export const DELETE = withErrorHandler(async (request: NextRequest, context) => 
     "SELECT * FROM sessions WHERE id = $1",
     [sessionId],
   );
-  if (!session) {
-    return NextResponse.json({ error: { code: "not_found", message: "Session not found" } }, { status: 404 });
-  }
+  if (!session) throw new NotFoundError("Session not found");
 
   // Stop sandbox if alive
   if (session.sandbox_id) {

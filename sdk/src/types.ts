@@ -99,6 +99,7 @@ export interface Run {
   transcript_blob_url: string | null;
   error_type: string | null;
   error_messages: string[];
+  session_id: string | null;
   sandbox_id: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -114,6 +115,7 @@ export interface CreateRunParams {
 
 export interface ListRunsParams extends PaginationParams {
   agent_id?: string | undefined;
+  session_id?: string | undefined;
   status?: RunStatus | undefined;
 }
 

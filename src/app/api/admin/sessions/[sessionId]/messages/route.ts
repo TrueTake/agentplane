@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
-import { queryOne } from "@/db";
+import { queryOne, withTenantTransaction } from "@/db";
 import { withErrorHandler } from "@/lib/api";
 import { SendMessageSchema, SessionRow, AgentRowInternal } from "@/lib/validation";
-import { getSession, transitionSessionStatus } from "@/lib/sessions";
-import { createNdjsonStream, ndjsonHeaders } from "@/lib/streaming";
-import { prepareSessionSandbox, executeSessionMessage, finalizeSessionMessage } from "@/lib/session-executor";
-import { logger } from "@/lib/logger";
+import { transitionSessionStatus } from "@/lib/sessions";
+import { checkTenantBudget } from "@/lib/runs";
+import { prepareSessionSandbox, executeSessionMessage, createSessionStreamResponse } from "@/lib/session-executor";
 import { ConflictError, NotFoundError } from "@/lib/errors";
-import type { TenantId } from "@/lib/types";
+import { logger } from "@/lib/logger";
+import type { TenantId, SessionStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -33,6 +33,34 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
   }
 
   const tenantId = session.tenant_id as TenantId;
+
+  // Atomically claim the session lock: transition idle/creating → active
+  const fromStatus = session.status as SessionStatus;
+  const claimed = await transitionSessionStatus(
+    sessionId,
+    tenantId,
+    fromStatus,
+    "active",
+    { idle_since: null },
+  );
+  if (!claimed) {
+    throw new ConflictError("Session is currently processing a message");
+  }
+
+  // Check tenant budget (long-lived sessions could outlive creation-time check)
+  await withTenantTransaction(tenantId, async (tx) => {
+    await checkTenantBudget(tx, tenantId);
+  }).catch(async (err) => {
+    await transitionSessionStatus(sessionId, tenantId, "active", "idle", {
+      idle_since: new Date().toISOString(),
+    }).catch((rollbackErr) => {
+      logger.error("Failed to rollback session to idle after budget check failure", {
+        session_id: sessionId,
+        error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+      });
+    });
+    throw err;
+  });
 
   // Load agent
   const agent = await queryOne(
@@ -64,52 +92,19 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
     session,
   );
 
-  const { runId, logIterator, transcriptChunks, sdkSessionIdRef } =
-    await executeSessionMessage(
-      {
-        sessionId,
-        tenantId,
-        agent,
-        prompt: input.prompt,
-        platformApiUrl: new URL(request.url).origin,
-        effectiveBudget,
-        effectiveMaxTurns,
-      },
-      sandbox,
-      session,
-    );
-
-  let detached = false;
-
-  async function* streamWithFinalize() {
-    for await (const line of logIterator) {
-      yield line;
-    }
-
-    if (!detached) {
-      await finalizeSessionMessage(
-        runId,
-        tenantId,
-        sessionId,
-        transcriptChunks,
-        effectiveBudget,
-        sandbox,
-        sdkSessionIdRef.value,
-      );
-    }
-  }
-
-  const stream = createNdjsonStream({
-    runId,
-    logIterator: streamWithFinalize(),
-    onDetach: () => {
-      detached = true;
-      logger.info("Admin session message stream detached", {
-        session_id: sessionId,
-        run_id: runId,
-      });
+  const result = await executeSessionMessage(
+    {
+      sessionId,
+      tenantId,
+      agent,
+      prompt: input.prompt,
+      platformApiUrl: new URL(request.url).origin,
+      effectiveBudget,
+      effectiveMaxTurns,
     },
-  });
+    sandbox,
+    session,
+  );
 
-  return new Response(stream, { status: 200, headers: ndjsonHeaders() });
+  return createSessionStreamResponse(result, tenantId, sessionId, effectiveBudget);
 });

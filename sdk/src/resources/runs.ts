@@ -109,6 +109,7 @@ export class RunsResource {
       limit: params?.limit,
       offset: params?.offset,
       agent_id: params?.agent_id,
+      session_id: params?.session_id,
       status: params?.status,
     };
 

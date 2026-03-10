@@ -131,7 +131,12 @@ export async function buildMcpConfig(
           await markConnectionFailed(
             conn.id as McpConnectionId,
             tenantId as TenantId,
-          ).catch(() => {});
+          ).catch((markErr) => {
+            logger.warn("Failed to mark MCP connection as failed", {
+              connection_id: conn.id,
+              error: markErr instanceof Error ? markErr.message : String(markErr),
+            });
+          });
         }
       }
     }

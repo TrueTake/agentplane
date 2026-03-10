@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { query, queryOne, execute, withTenantTransaction } from "@/db";
 import { SessionRow, AgentRowInternal, AgentInternal } from "./validation";
+import { checkTenantBudget } from "./runs";
 import { logger } from "./logger";
 import {
   NotFoundError,
@@ -18,7 +19,7 @@ export type Session = z.infer<typeof SessionRow>;
 export async function createSession(
   tenantId: TenantId,
   agentId: AgentId,
-): Promise<{ session: Session; agent: AgentInternal }> {
+): Promise<{ session: Session; agent: AgentInternal; remainingBudget: number }> {
   return withTenantTransaction(tenantId, async (tx) => {
     const agent = await tx.queryOne(
       AgentRowInternal,
@@ -26,6 +27,8 @@ export async function createSession(
       [agentId, tenantId],
     );
     if (!agent) throw new NotFoundError("Agent not found");
+
+    const remainingBudget = await checkTenantBudget(tx, tenantId);
 
     const result = await tx.queryOne(
       SessionRow,
@@ -43,7 +46,7 @@ export async function createSession(
     }
 
     logger.info("Session created", { session_id: result.id, agent_id: agentId, tenant_id: tenantId });
-    return { session: result, agent };
+    return { session: result, agent, remainingBudget };
   });
 }
 
