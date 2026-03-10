@@ -7,7 +7,7 @@ import { ConnectorsResource } from "./resources/connectors";
 import { CustomConnectorsResource } from "./resources/custom-connectors";
 import { PluginMarketplacesResource } from "./resources/plugin-marketplaces";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 const MAX_ERROR_BODY_BYTES = 64 * 1024; // 64KB
 
 export class AgentPlane {

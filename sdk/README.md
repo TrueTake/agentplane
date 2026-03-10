@@ -26,8 +26,8 @@ const stream = await client.runs.create({
 });
 
 for await (const event of stream) {
-  if (event.type === "assistant") {
-    console.log(event.message);
+  if (event.type === "text_delta") {
+    process.stdout.write(event.text);
   }
 }
 ```
@@ -60,8 +60,12 @@ for await (const event of stream) {
     case "run_started":
       console.log("Run started:", event.run_id);
       break;
+    case "text_delta":
+      process.stdout.write(event.text);
+      break;
     case "assistant":
-      console.log("Assistant:", event.message);
+      // Full message object: event.message.content is an array of content blocks
+      console.log("Assistant turn:", event.message);
       break;
     case "tool_use":
       console.log("Tool:", event.name);
