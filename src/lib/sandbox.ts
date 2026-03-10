@@ -7,24 +7,38 @@ import type { McpServerConfig } from "./mcp";
 // Pre-built snapshot with @anthropic-ai/claude-agent-sdk installed.
 // Created lazily on first cold start, then reused for all subsequent sandboxes.
 // Eliminates ~3-4s npm install on every cold start.
+// Rebuilt automatically if older than 24 hours (picks up SDK updates).
+const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 let sdkSnapshotId: string | null = null;
+let sdkSnapshotCreatedAt: number | null = null;
 let sdkSnapshotPromise: Promise<string> | null = null;
 
 async function getOrCreateSdkSnapshot(): Promise<string> {
-  if (sdkSnapshotId) return sdkSnapshotId;
+  // Return cached snapshot if still fresh
+  if (sdkSnapshotId && sdkSnapshotCreatedAt && Date.now() - sdkSnapshotCreatedAt < SNAPSHOT_MAX_AGE_MS) {
+    return sdkSnapshotId;
+  }
 
   // Deduplicate concurrent snapshot creation requests
   if (sdkSnapshotPromise) return sdkSnapshotPromise;
 
   sdkSnapshotPromise = (async () => {
-    // Check if we already have a valid snapshot
+    // Check if we already have a valid, recent snapshot
     try {
       const result = await Snapshot.list({ limit: 10 });
-      // Find a recent, valid snapshot (created status means it's usable)
-      const existing = result.json.snapshots.find((s: { status: string }) => s.status === "created");
+      const now = Date.now();
+      const existing = result.json.snapshots.find(
+        (s: { status: string; createdAt: number }) =>
+          s.status === "created" && now - s.createdAt < SNAPSHOT_MAX_AGE_MS,
+      );
       if (existing) {
         sdkSnapshotId = existing.id;
-        logger.info("Reusing existing SDK snapshot", { snapshot_id: existing.id });
+        sdkSnapshotCreatedAt = existing.createdAt;
+        logger.info("Reusing existing SDK snapshot", {
+          snapshot_id: existing.id,
+          age_hours: ((now - existing.createdAt) / 3600_000).toFixed(1),
+        });
         return existing.id;
       }
     } catch (err) {
@@ -54,6 +68,7 @@ async function getOrCreateSdkSnapshot(): Promise<string> {
     // snapshot() stops the sandbox automatically
     const snapshot = await sandbox.snapshot();
     sdkSnapshotId = snapshot.snapshotId;
+    sdkSnapshotCreatedAt = Date.now();
     logger.info("SDK snapshot created", { snapshot_id: snapshot.snapshotId });
     return snapshot.snapshotId;
   })();
@@ -68,6 +83,7 @@ async function getOrCreateSdkSnapshot(): Promise<string> {
 /** Invalidate the cached snapshot (e.g. if sandbox creation from it fails). */
 function invalidateSdkSnapshot() {
   sdkSnapshotId = null;
+  sdkSnapshotCreatedAt = null;
 }
 
 export interface SandboxConfig {
