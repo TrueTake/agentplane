@@ -88,6 +88,7 @@ const A2aAgentRow = z.object({
   name: z.string(),
   description: z.string().nullable(),
   max_runtime_seconds: z.coerce.number(),
+  a2a_tags: z.array(z.string()).default([]),
 });
 
 export async function buildAgentCard(
@@ -100,7 +101,7 @@ export async function buildAgentCard(
 
   // Query a2a_enabled agents for this tenant (by ID — caller already resolved slug)
   const rows = await sql`
-    SELECT a.id, a.name, a.description, a.max_runtime_seconds
+    SELECT a.id, a.name, a.description, a.max_runtime_seconds, a.a2a_tags
     FROM agents a
     WHERE a.tenant_id = ${tenantId}
       AND a.a2a_enabled = true
@@ -118,7 +119,7 @@ export async function buildAgentCard(
     description: agent.description || `Agent: ${agent.name} (max runtime: ${agent.max_runtime_seconds}s)`,
     inputModes: ["text/plain"],
     outputModes: ["text/plain"],
-    tags: [],
+    tags: agent.a2a_tags,
   }));
 
   return {

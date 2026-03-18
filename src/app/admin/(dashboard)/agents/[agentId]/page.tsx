@@ -77,8 +77,10 @@ export default async function AgentDetailPage({
 
       {agent.a2a_enabled && tenant && (
         <A2aInfoSection
+          agentId={agent.id}
           tenantSlug={tenant.slug}
           baseUrl={getCallbackBaseUrl()}
+          initialTags={agent.a2a_tags}
         />
       )}
 

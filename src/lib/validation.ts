@@ -259,6 +259,7 @@ export const UpdateAgentSchema = z.object({
   max_budget_usd: z.number().min(0.01).max(100.0),
   max_runtime_seconds: z.number().int().min(60).max(3600),
   a2a_enabled: z.boolean(),
+  a2a_tags: z.array(z.string().min(1).max(100)),
 }).partial();
 
 export type CreateAgentInput = z.infer<typeof CreateAgentSchema>;
@@ -346,6 +347,7 @@ export const AgentRow = z.object({
   max_budget_usd: z.coerce.number(),
   max_runtime_seconds: z.coerce.number(),
   a2a_enabled: z.boolean().default(false),
+  a2a_tags: z.array(z.string()).default([]),
   created_at: z.coerce.string(),
   updated_at: z.coerce.string(),
 });

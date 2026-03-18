@@ -1,0 +1,1 @@
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS a2a_tags text[] NOT NULL DEFAULT '{}';

@@ -1,24 +1,69 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, KeyboardEvent } from "react";
 import { SectionHeader } from "@/components/ui/section-header";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Button } from "@/components/ui/button";
 
 export function A2aInfoSection({
+  agentId,
   tenantSlug,
   baseUrl,
+  initialTags,
 }: {
+  agentId: string;
   tenantSlug: string;
   baseUrl: string;
+  initialTags: string[];
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [cardPreview, setCardPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [tags, setTags] = useState<string[]>(initialTags);
+  const [tagInput, setTagInput] = useState("");
+  const [savingTags, setSavingTags] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const endpointUrl = `${baseUrl}/api/a2a/${tenantSlug}`;
   const jsonRpcUrl = `${baseUrl}/api/a2a/${tenantSlug}/jsonrpc`;
   const agentCardUrl = `${baseUrl}/api/a2a/${tenantSlug}/.well-known/agent-card.json`;
+
+  async function saveTags(nextTags: string[]) {
+    setSavingTags(true);
+    try {
+      await fetch(`/api/admin/agents/${agentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ a2a_tags: nextTags }),
+      });
+    } finally {
+      setSavingTags(false);
+    }
+  }
+
+  function addTag(value: string) {
+    const tag = value.trim();
+    if (!tag || tags.includes(tag)) return;
+    const next = [...tags, tag];
+    setTags(next);
+    setTagInput("");
+    saveTags(next);
+  }
+
+  function removeTag(tag: string) {
+    const next = tags.filter((t) => t !== tag);
+    setTags(next);
+    saveTags(next);
+  }
+
+  function onTagKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addTag(tagInput);
+    } else if (e.key === "Backspace" && tagInput === "" && tags.length > 0) {
+      removeTag(tags[tags.length - 1]);
+    }
+  }
 
   async function fetchAgentCard() {
     if (cardPreview) {
@@ -41,11 +86,47 @@ export function A2aInfoSection({
     <div className="rounded-lg border border-indigo-500/25 p-5">
       <SectionHeader title="A2A Protocol" />
       <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <code className="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono text-foreground break-all">
-            {endpointUrl}
-          </code>
-          <CopyButton text={endpointUrl} />
+        <div className="grid grid-cols-2 gap-4 items-start">
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">URL</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded bg-muted px-3 py-1.5 text-xs font-mono text-foreground break-all">
+                {endpointUrl}
+              </code>
+              <CopyButton text={endpointUrl} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Tags</label>
+            <div
+              className="flex flex-wrap items-center gap-1.5 rounded border border-input bg-muted px-2 py-1.5 min-h-[32px] cursor-text"
+              onClick={() => inputRef.current?.focus()}
+            >
+              {tags.map((tag) => (
+                <span key={tag} className="flex items-center gap-1 rounded bg-indigo-500/20 text-indigo-300 text-xs px-2 py-0.5">
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); removeTag(tag); }}
+                    className="hover:text-white leading-none"
+                    disabled={savingTags}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <input
+                ref={inputRef}
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={onTagKeyDown}
+                onBlur={() => tagInput.trim() && addTag(tagInput)}
+                placeholder={tags.length === 0 ? "Add tags…" : ""}
+                className="flex-1 min-w-[80px] bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                disabled={savingTags}
+              />
+            </div>
+          </div>
         </div>
         <button
           onClick={() => setDetailsOpen((v) => !v)}

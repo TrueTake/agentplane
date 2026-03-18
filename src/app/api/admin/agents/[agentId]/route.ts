@@ -72,6 +72,7 @@ export const PATCH = withErrorHandler(async (request: NextRequest, context) => {
     ["skills", "skills", (v) => JSON.stringify(v)],
     ["plugins", "plugins", (v) => JSON.stringify(v)],
     ["a2a_enabled", "a2a_enabled"],
+    ["a2a_tags", "a2a_tags"],
   ];
 
   for (const [field, col, transform] of fieldMap) {
