@@ -133,7 +133,7 @@ export default async function AgentDetailPage({
                 <td className="p-3 max-w-xs text-muted-foreground text-xs truncate" title={r.prompt}>
                   {r.prompt.slice(0, 60)}{r.prompt.length > 60 ? "…" : ""}
                 </td>
-                <td className="p-3 text-right font-mono">${r.cost_usd.toFixed(4)}</td>
+                <td className="p-3 text-right font-mono">${r.cost_usd != null ? r.cost_usd.toFixed(4) : "—"}</td>
                 <td className="p-3 text-right">{r.num_turns}</td>
                 <td className="p-3 text-right text-muted-foreground text-xs">
                   {r.duration_ms > 0 ? `${(r.duration_ms / 1000).toFixed(1)}s` : "—"}

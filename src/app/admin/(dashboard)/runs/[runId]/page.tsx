@@ -93,7 +93,7 @@ export default async function RunDetailPage({
             <p className="text-xs text-muted-foreground mt-0.5 font-normal">{run.status}</p>
           </MetricCard>
         )}
-        <MetricCard label="Cost"><span className="font-mono">${run.cost_usd.toFixed(4)}</span></MetricCard>
+        <MetricCard label="Cost"><span className="font-mono">${run.cost_usd != null ? run.cost_usd.toFixed(4) : "—"}</span></MetricCard>
         <MetricCard label="Turns">{run.num_turns}</MetricCard>
         <MetricCard label="Duration">
           {run.duration_ms > 0 ? `${(run.duration_ms / 1000).toFixed(1)}s` : "—"}
