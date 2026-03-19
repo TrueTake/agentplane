@@ -457,6 +457,14 @@ export class SandboxAgentExecutor implements AgentExecutor {
         : undefined;
       const callbackUrl = cb?.callback_url as string | undefined;
 
+      logger.info("A2A message parts", {
+        text_parts: textParts.length,
+        data_parts: dataParts.length,
+        has_callback: !!cb,
+        callback_url: callbackUrl,
+        tool_count: cb?.available_tools ? (cb.available_tools as unknown[]).length : 0,
+      });
+
       // Build prompt from text parts (callback data is handled via MCP bridge, not prompt text)
       const prompt = textParts.map((p) => p.text).join("\n");
 

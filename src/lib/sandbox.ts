@@ -334,6 +334,8 @@ export async function createSandbox(config: SandboxConfig): Promise<SandboxInsta
   logger.info("Sandbox started", {
     run_id: config.runId,
     sandbox_id: sandbox.sandboxId,
+    has_callback_bridge: bridgeFiles.length > 0,
+    callback_url: config.callbackData?.url,
   });
 
   return {
