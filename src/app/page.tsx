@@ -99,11 +99,11 @@ function Hero() {
                 <div className="h-3 w-3 rounded-full bg-white/[0.08]" />
                 <div className="h-3 w-3 rounded-full bg-white/[0.08]" />
               </div>
-              <span className="ml-2 text-xs text-[hsl(240,5%,40%)] font-[family-name:var(--font-geist-mono)]">
+              <span className="ml-2 text-xs text-[hsl(240,5%,40%)] font-mono">
                 curl
               </span>
             </div>
-            <pre className="overflow-x-auto p-5 text-[13px] leading-6 font-[family-name:var(--font-geist-mono)]">
+            <pre className="overflow-x-auto p-5 text-[13px] leading-6 font-mono">
               <code>
                 <span className="text-[hsl(240,5%,50%)]">$ </span>
                 <span className="text-emerald-400">curl</span>
@@ -244,13 +244,13 @@ function HowItWorks() {
         <div className="grid gap-8 lg:grid-cols-3">
           {steps.map((s) => (
             <div key={s.step} className="flex flex-col">
-              <span className="mb-4 font-[family-name:var(--font-geist-mono)] text-xs text-[hsl(240,5%,35%)]">
+              <span className="mb-4 font-mono text-xs text-[hsl(240,5%,35%)]">
                 {s.step}
               </span>
               <h3 className="mb-2 text-lg font-semibold text-white">{s.title}</h3>
               <p className="mb-5 text-sm leading-relaxed text-[hsl(240,5%,50%)]">{s.description}</p>
               <div className="mt-auto overflow-hidden rounded-lg border border-white/[0.06] bg-[hsl(240,10%,5%)]">
-                <pre className="overflow-x-auto p-4 text-[13px] leading-6 font-[family-name:var(--font-geist-mono)] text-[hsl(240,5%,60%)]">
+                <pre className="overflow-x-auto p-4 text-[13px] leading-6 font-mono text-[hsl(240,5%,60%)]">
                   {s.code}
                 </pre>
               </div>
@@ -277,11 +277,11 @@ function Architecture() {
 
         <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl border border-white/[0.06] bg-[hsl(240,10%,5%)]">
           <div className="border-b border-white/[0.06] px-6 py-4">
-            <span className="font-[family-name:var(--font-geist-mono)] text-xs text-[hsl(240,5%,40%)]">
+            <span className="font-mono text-xs text-[hsl(240,5%,40%)]">
               execution flow
             </span>
           </div>
-          <div className="p-8 font-[family-name:var(--font-geist-mono)] text-sm leading-8 text-[hsl(240,5%,50%)]">
+          <div className="p-8 font-mono text-sm leading-8 text-[hsl(240,5%,50%)]">
             <div className="flex items-center gap-3">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.06] text-xs text-white">1</span>
               <span>Client POSTs prompt to</span>
