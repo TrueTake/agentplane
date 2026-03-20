@@ -3,6 +3,7 @@ import { LogoutButton } from "./logout-button";
 import { SidebarNav } from "./sidebar-nav";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { TenantSwitcher } from "@/components/layout/tenant-switcher";
+import { TopBar } from "@/components/layout/top-bar";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -26,8 +27,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 overflow-auto">
-          <div className="p-6">{children}</div>
+        <main className="flex-1 flex flex-col overflow-hidden">
+          <TopBar />
+          <div className="flex-1 overflow-auto p-6">{children}</div>
         </main>
       </div>
     </>
