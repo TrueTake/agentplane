@@ -88,6 +88,34 @@ function buildConversation(events: TranscriptEvent[]): ConversationItem[] {
           }
         }
       }
+    } else if (event.type === "tool_use") {
+      // Vercel AI SDK flat tool_use events
+      const idx = items.length;
+      items.push({
+        role: "tool",
+        toolName: String(event.tool_name || event.name || "unknown"),
+        toolInput: event.input,
+        toolUseId: event.tool_use_id ? String(event.tool_use_id) : undefined,
+      });
+      if (event.tool_use_id) toolCallMap.set(String(event.tool_use_id), idx);
+    } else if (event.type === "tool_result") {
+      // Vercel AI SDK flat tool_result events
+      const id = String(event.tool_use_id || "");
+      const idx = toolCallMap.get(id);
+      const output = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+      if (idx !== undefined && items[idx]) {
+        items[idx] = { ...items[idx], toolOutput: output };
+      }
+    } else if (event.type === "run_started") {
+      items.push({
+        role: "system",
+        model: String(event.model || ""),
+      });
+    } else if (event.type === "mcp_error") {
+      items.push({
+        role: "error",
+        error: `MCP (${event.server}): ${event.error}`,
+      });
     } else if (event.type === "result") {
       items.push({
         role: "result",
