@@ -5,11 +5,13 @@ import { Tabs } from "@/components/ui/tabs";
 
 export function AgentTabs({
   general,
+  runs,
   connectors,
   pluginsAndSkills,
   schedules,
 }: {
   general: ReactNode;
+  runs: ReactNode;
   connectors: ReactNode;
   pluginsAndSkills: ReactNode;
   schedules: ReactNode;
@@ -18,6 +20,7 @@ export function AgentTabs({
     <Tabs
       tabs={[
         { label: "General", content: general },
+        { label: "Runs", content: runs },
         { label: "Connectors", content: connectors },
         { label: "Plugins & Skills", content: pluginsAndSkills },
         { label: "Schedules", content: schedules },

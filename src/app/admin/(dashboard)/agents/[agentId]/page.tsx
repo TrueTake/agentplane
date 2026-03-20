@@ -11,6 +11,7 @@ import { PluginsManager } from "./plugins-manager";
 import { ScheduleEditor } from "./schedule-editor";
 import { AgentHeaderActions } from "./header-actions";
 import { AgentTabs } from "./agent-tabs";
+import { AgentRuns } from "./agent-runs";
 import { getCallbackBaseUrl } from "@/lib/mcp-connections";
 
 export const dynamic = "force-dynamic";
@@ -44,18 +45,17 @@ export default async function AgentDetailPage({
         <AgentHeaderActions agentId={agent.id} tenantId={agent.tenant_id} />
       </div>
 
-      <div className="grid grid-cols-6 gap-4">
-        <MetricCard label="Runs">{totalRuns}</MetricCard>
-        <MetricCard label="Max Turns">{agent.max_turns}</MetricCard>
-        <MetricCard label="Budget"><span className="font-mono">${agent.max_budget_usd.toFixed(2)}</span></MetricCard>
-        <MetricCard label="Max Runtime"><span className="font-mono">{Math.floor(agent.max_runtime_seconds / 60)}m</span></MetricCard>
-        <MetricCard label="Skills">{agent.skills.length}</MetricCard>
-        <MetricCard label="Plugins">{agent.plugins.length}</MetricCard>
-      </div>
-
       <AgentTabs
         general={
           <div className="space-y-6">
+            <div className="grid grid-cols-6 gap-4">
+              <MetricCard label="Runs">{totalRuns}</MetricCard>
+              <MetricCard label="Max Turns">{agent.max_turns}</MetricCard>
+              <MetricCard label="Budget"><span className="font-mono">${agent.max_budget_usd.toFixed(2)}</span></MetricCard>
+              <MetricCard label="Max Runtime"><span className="font-mono">{Math.floor(agent.max_runtime_seconds / 60)}m</span></MetricCard>
+              <MetricCard label="Skills">{agent.skills.length}</MetricCard>
+              <MetricCard label="Plugins">{agent.plugins.length}</MetricCard>
+            </div>
             <AgentEditForm agent={agent} />
             {tenant && (
               <A2aInfoSection
@@ -68,6 +68,9 @@ export default async function AgentDetailPage({
               />
             )}
           </div>
+        }
+        runs={
+          <AgentRuns agentId={agent.id} />
         }
         connectors={
           <ConnectorsManager agentId={agent.id} toolkits={agent.composio_toolkits} composioAllowedTools={agent.composio_allowed_tools} hasPlugins={agent.plugins.length > 0} />
