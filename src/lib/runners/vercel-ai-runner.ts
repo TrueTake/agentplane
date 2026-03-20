@@ -65,12 +65,14 @@ export function buildVercelAiRunnerScript(config: SandboxConfig): string {
   // by the Vercel Sandbox boundary (network allowlist, isolated filesystem).
   return `
 import { streamText, stopWhen, stepCountIs } from 'ai';
+import { gateway } from '@ai-sdk/gateway';
 import { createMCPClient } from '@ai-sdk/mcp';
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { execSync } from 'child_process';
 
-const model = ${JSON.stringify(config.agent.model)};
+const modelId = ${JSON.stringify(config.agent.model)};
+const model = gateway(modelId);
 const prompt = ${JSON.stringify(config.prompt)};
 const runId = process.env.AGENT_PLANE_RUN_ID;
 const platformUrl = process.env.AGENT_PLANE_PLATFORM_URL;
@@ -236,7 +238,7 @@ async function main() {
     type: 'run_started',
     run_id: runId,
     agent_id: process.env.AGENT_PLANE_AGENT_ID,
-    model: model,
+    model: modelId,
     timestamp: new Date().toISOString(),
     mcp_server_count: Object.keys(mcpTools).length,
     mcp_server_names: Object.keys(mcpTools),
@@ -297,7 +299,7 @@ async function main() {
         input_tokens: totalUsage?.inputTokens || 0,
         output_tokens: totalUsage?.outputTokens || 0,
       },
-      model,
+      model: modelId,
       runner: 'vercel-ai-sdk',
       generation_id: generationId,
     });
@@ -305,7 +307,7 @@ async function main() {
     const msg = error instanceof Error ? error.message : String(error);
     // Detect tool-use not supported by the model (match specific provider error patterns)
     if (msg.includes('does not support tools') || msg.includes('tool_use is not supported') || msg.includes('does not support function')) {
-      emit({ type: 'error', code: 'tool_use_not_supported', error: 'Model ' + model + ' does not support tool use. Try a model that supports function calling.' });
+      emit({ type: 'error', code: 'tool_use_not_supported', error: 'Model ' + modelId + ' does not support tool use. Try a model that supports function calling.' });
     } else {
       emit({ type: 'error', code: 'execution_error', error: msg.slice(0, 500) });
     }

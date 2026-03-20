@@ -74,7 +74,7 @@ export async function refreshSdkSnapshot(): Promise<{ snapshotId: string; cleane
 
   const installCmd = await sandbox.runCommand({
     cmd: "npm",
-    args: ["install", "@anthropic-ai/claude-agent-sdk", "ai", "@ai-sdk/mcp", "@modelcontextprotocol/sdk", "zod"],
+    args: ["install", "@anthropic-ai/claude-agent-sdk", "ai", "@ai-sdk/gateway", "@ai-sdk/mcp", "@modelcontextprotocol/sdk", "zod"],
   });
   if (installCmd.exitCode !== 0) {
     const stderr = await installCmd.stderr();
@@ -195,7 +195,7 @@ async function createSandboxFromSnapshot(opts: {
 async function installSdk(sandbox: Sandbox, contextId: string): Promise<void> {
   const installCmd = await sandbox.runCommand({
     cmd: "npm",
-    args: ["install", "@anthropic-ai/claude-agent-sdk", "ai", "@ai-sdk/mcp", "@modelcontextprotocol/sdk", "zod"],
+    args: ["install", "@anthropic-ai/claude-agent-sdk", "ai", "@ai-sdk/gateway", "@ai-sdk/mcp", "@modelcontextprotocol/sdk", "zod"],
   });
   if (installCmd.exitCode !== 0) {
     const installErrors = await installCmd.stderr();
@@ -319,6 +319,7 @@ export async function createSandbox(config: SandboxConfig): Promise<SandboxInsta
   env.ANTHROPIC_BASE_URL = "https://ai-gateway.vercel.sh";
   env.ANTHROPIC_AUTH_TOKEN = config.aiGatewayApiKey;
   env.ANTHROPIC_API_KEY = "";
+  env.AI_GATEWAY_API_KEY = config.aiGatewayApiKey;
   env.ENABLE_TOOL_SEARCH = "true";
   if (config.runToken) {
     env.AGENT_PLANE_RUN_TOKEN = config.runToken;
@@ -834,6 +835,7 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
     ANTHROPIC_BASE_URL: "https://ai-gateway.vercel.sh",
     ANTHROPIC_AUTH_TOKEN: config.aiGatewayApiKey,
     ANTHROPIC_API_KEY: "",
+    AI_GATEWAY_API_KEY: config.aiGatewayApiKey,
     ENABLE_TOOL_SEARCH: "true",
   };
   if (hasMcp) {
@@ -1097,6 +1099,7 @@ export async function reconnectSessionSandbox(
       ANTHROPIC_BASE_URL: "https://ai-gateway.vercel.sh",
       ANTHROPIC_AUTH_TOKEN: config.aiGatewayApiKey,
       ANTHROPIC_API_KEY: "",
+      AI_GATEWAY_API_KEY: config.aiGatewayApiKey,
       ENABLE_TOOL_SEARCH: "true",
     };
     if (hasMcp) {

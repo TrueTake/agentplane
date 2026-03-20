@@ -43,12 +43,14 @@ export function buildVercelAiSessionRunnerScript(config: SessionRunnerConfig): s
   // by the Vercel Sandbox boundary (network allowlist, isolated filesystem).
   return `
 import { streamText, stopWhen, stepCountIs } from 'ai';
+import { gateway } from '@ai-sdk/gateway';
 import { createMCPClient } from '@ai-sdk/mcp';
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { execSync } from 'child_process';
 
-const model = ${JSON.stringify(config.agent.model)};
+const modelId = ${JSON.stringify(config.agent.model)};
+const model = gateway(modelId);
 const prompt = ${JSON.stringify(config.prompt)};
 const runId = process.env.AGENT_PLANE_RUN_ID;
 const platformUrl = process.env.AGENT_PLANE_PLATFORM_URL;
@@ -72,12 +74,12 @@ const MAX_TOOL_RESULT_SIZE = 50_000;
 
 function loadHistory() {
   if (!existsSync(HISTORY_PATH)) {
-    return { runner: 'vercel-ai-sdk', messages: [], metadata: { model, totalTokens: 0, turnCount: 0 } };
+    return { runner: 'vercel-ai-sdk', messages: [], metadata: { model: modelId, totalTokens: 0, turnCount: 0 } };
   }
   try {
     return JSON.parse(readFileSync(HISTORY_PATH, 'utf-8'));
   } catch {
-    return { runner: 'vercel-ai-sdk', messages: [], metadata: { model, totalTokens: 0, turnCount: 0 } };
+    return { runner: 'vercel-ai-sdk', messages: [], metadata: { model: modelId, totalTokens: 0, turnCount: 0 } };
   }
 }
 
@@ -219,7 +221,7 @@ async function main() {
     type: 'run_started',
     run_id: runId,
     agent_id: process.env.AGENT_PLANE_AGENT_ID,
-    model: model,
+    model: modelId,
     timestamp: new Date().toISOString(),
     mcp_server_count: Object.keys(mcpTools).length,
     mcp_errors: ${JSON.stringify(mcpErrors)},
@@ -282,7 +284,7 @@ async function main() {
         input_tokens: totalUsage?.inputTokens || 0,
         output_tokens: totalUsage?.outputTokens || 0,
       },
-      model,
+      model: modelId,
       runner: 'vercel-ai-sdk',
       generation_id: generationId,
     });
