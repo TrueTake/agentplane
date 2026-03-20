@@ -152,8 +152,8 @@ describe("agentCardCache", () => {
   });
 
   it("evicts oldest entry when cache is full", () => {
-    // Fill cache with 100 entries
-    for (let i = 0; i < 100; i++) {
+    // Fill cache to max (AGENT_CARD_CACHE_MAX = 1000)
+    for (let i = 0; i < 1000; i++) {
       setCachedAgentCard(`evict-slug-${i}`, { name: `Agent ${i}` } as Parameters<typeof setCachedAgentCard>[1]);
     }
     // Adding one more should evict the oldest (evict-slug-0)
