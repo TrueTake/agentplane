@@ -102,9 +102,17 @@ function buildConversation(events: TranscriptEvent[]): ConversationItem[] {
       // Vercel AI SDK flat tool_result events
       const id = String(event.tool_use_id || "");
       const idx = toolCallMap.get(id);
-      const output = typeof event.result === "string" ? event.result : JSON.stringify(event.result);
+      const output = typeof event.result === "string" ? event.result : JSON.stringify(event.result, null, 2);
       if (idx !== undefined && items[idx]) {
         items[idx] = { ...items[idx], toolOutput: output };
+      } else {
+        // Unmatched result — show as standalone tool result
+        items.push({
+          role: "tool",
+          toolName: String(event.tool_name || "tool"),
+          toolOutput: output,
+          toolUseId: id || undefined,
+        });
       }
     } else if (event.type === "run_started") {
       items.push({
