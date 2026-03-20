@@ -7,6 +7,7 @@ import { AdminTable, AdminTableHead, AdminTableRow, Th, EmptyRow } from "@/compo
 import { LocalDate } from "@/components/local-date";
 import { query, queryOne } from "@/db";
 import { RunTriggeredBySchema } from "@/lib/validation";
+import { getActiveTenantId } from "@/lib/active-tenant";
 import { z } from "zod";
 
 const RunWithContext = z.object({
@@ -14,7 +15,6 @@ const RunWithContext = z.object({
   agent_id: z.string(),
   agent_name: z.string(),
   tenant_id: z.string(),
-  tenant_name: z.string(),
   status: z.string(),
   prompt: z.string(),
   cost_usd: z.coerce.number(),
@@ -38,26 +38,40 @@ export default async function RunsPage({
 }: {
   searchParams: Promise<{ page?: string; pageSize?: string; source?: string }>;
 }) {
+  const tenantId = (await getActiveTenantId()) ?? null;
+  if (!tenantId) {
+    return (
+      <div className="text-muted-foreground text-sm py-12 text-center">
+        Select a tenant from the sidebar.
+      </div>
+    );
+  }
+
   const { page: pageParam, pageSize: pageSizeParam, source: sourceParam } = await searchParams;
   const { page, pageSize, offset } = parsePaginationParams(pageParam, pageSizeParam);
   const sourceFilter = VALID_SOURCES.includes(sourceParam as typeof VALID_SOURCES[number])
     ? (sourceParam as typeof VALID_SOURCES[number])
     : null;
 
-  const sourceWhere = sourceFilter ? `WHERE r.triggered_by = $3` : "";
-  const sourceWhereCount = sourceFilter ? `WHERE r.triggered_by = $1` : "";
-  const params = sourceFilter ? [pageSize, offset, sourceFilter] : [pageSize, offset];
+  const sourceWhere = sourceFilter
+    ? `WHERE r.tenant_id = $3 AND r.triggered_by = $4`
+    : `WHERE r.tenant_id = $3`;
+  const sourceWhereCount = sourceFilter
+    ? `WHERE r.tenant_id = $1 AND r.triggered_by = $2`
+    : `WHERE r.tenant_id = $1`;
+  const params = sourceFilter
+    ? [pageSize, offset, tenantId, sourceFilter]
+    : [pageSize, offset, tenantId];
 
   const [runs, countResult] = await Promise.all([
     query(
       RunWithContext,
-      `SELECT r.id, r.agent_id, a.name AS agent_name, r.tenant_id, t.name AS tenant_name,
+      `SELECT r.id, r.agent_id, a.name AS agent_name, r.tenant_id,
          r.status, r.triggered_by, r.prompt, r.cost_usd, r.num_turns, r.duration_ms,
          r.total_input_tokens, r.total_output_tokens, r.error_type,
          r.started_at, r.completed_at, r.created_at
        FROM runs r
        JOIN agents a ON a.id = r.agent_id
-       JOIN tenants t ON t.id = r.tenant_id
        ${sourceWhere}
        ORDER BY r.created_at DESC
        LIMIT $1 OFFSET $2`,
@@ -67,9 +81,8 @@ export default async function RunsPage({
       z.object({ total: z.number() }),
       `SELECT COUNT(*)::int AS total FROM runs r
        JOIN agents a ON a.id = r.agent_id
-       JOIN tenants t ON t.id = r.tenant_id
        ${sourceWhereCount}`,
-      sourceFilter ? [sourceFilter] : [],
+      sourceFilter ? [tenantId, sourceFilter] : [tenantId],
     ),
   ]);
 
@@ -91,7 +104,6 @@ export default async function RunsPage({
         <AdminTableHead>
           <Th>Run</Th>
           <Th>Agent</Th>
-          <Th>Tenant</Th>
           <Th>Status</Th>
           <Th>Source</Th>
           <Th className="max-w-xs">Prompt</Th>
@@ -109,9 +121,6 @@ export default async function RunsPage({
                 </Link>
               </td>
               <td className="p-3 text-xs">{r.agent_name}</td>
-              <td className="p-3 text-xs text-muted-foreground">
-                {r.tenant_name}
-              </td>
               <td className="p-3"><RunStatusBadge status={r.status} /></td>
               <td className="p-3">
                 <RunSourceBadge triggeredBy={r.triggered_by} />
@@ -129,7 +138,7 @@ export default async function RunsPage({
               </td>
             </AdminTableRow>
           ))}
-          {runs.length === 0 && <EmptyRow colSpan={10}>No runs found</EmptyRow>}
+          {runs.length === 0 && <EmptyRow colSpan={9}>No runs found</EmptyRow>}
         </tbody>
       </AdminTable>
     </div>

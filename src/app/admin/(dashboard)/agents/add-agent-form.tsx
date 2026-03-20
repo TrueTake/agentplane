@@ -11,23 +11,17 @@ import { FormError } from "@/components/ui/form-error";
 import { ModelSelector } from "@/components/model-selector";
 import { supportsClaudeRunner } from "@/lib/models";
 
-interface Tenant {
-  id: string;
-  name: string;
-}
-
 interface Props {
-  tenants: Tenant[];
-  defaultTenantId?: string;
+  tenantId: string;
 }
 
-export function AddAgentForm({ tenants, defaultTenantId }: Props) {
+export function AddAgentForm({ tenantId }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
-    tenant_id: defaultTenantId ?? tenants[0]?.id ?? "",
+    tenant_id: tenantId,
     name: "",
     description: "",
     model: "claude-sonnet-4-6",
@@ -40,7 +34,7 @@ export function AddAgentForm({ tenants, defaultTenantId }: Props) {
 
   function resetForm() {
     setForm({
-      tenant_id: defaultTenantId ?? tenants[0]?.id ?? "",
+      tenant_id: tenantId,
       name: "",
       description: "",
       model: "claude-sonnet-4-6",
@@ -98,19 +92,6 @@ export function AddAgentForm({ tenants, defaultTenantId }: Props) {
               <DialogTitle>Add Agent</DialogTitle>
             </DialogHeader>
             <DialogBody className="space-y-3">
-              {!defaultTenantId && (
-                <FormField label="Tenant">
-                  <Select
-                    value={form.tenant_id}
-                    onChange={(e) => setForm((f) => ({ ...f, tenant_id: e.target.value }))}
-                    required
-                  >
-                    {tenants.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </Select>
-                </FormField>
-              )}
               <FormField label="Name">
                 <Input
                   value={form.name}

@@ -88,7 +88,7 @@ export default async function TenantDetailPage({
       {/* Agents table */}
       <div className="rounded-lg border border-muted-foreground/25 p-5">
         <SectionHeader title="Agents">
-          <AddAgentForm tenants={[{ id: tenant.id, name: tenant.name }]} defaultTenantId={tenant.id} />
+          <AddAgentForm tenantId={tenant.id} />
         </SectionHeader>
         <AdminTable>
           <AdminTableHead>
