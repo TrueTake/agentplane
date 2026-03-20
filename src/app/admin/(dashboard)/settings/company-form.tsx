@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/ui/section-header";
 import { FormField } from "@/components/ui/form-field";
 
-interface Tenant {
+interface Company {
   id: string;
   name: string;
   slug: string;
@@ -25,7 +25,7 @@ const TIMEZONES = typeof Intl !== "undefined" && Intl.supportedValuesOf
   ? Intl.supportedValuesOf("timeZone")
   : ["UTC"];
 
-export function TenantForm({ tenant }: { tenant: Tenant }) {
+export function CompanyForm({ tenant }: { tenant: Company }) {
   const router = useRouter();
   const [name, setName] = useState(tenant.name);
   const [budget, setBudget] = useState(tenant.monthly_budget_usd.toString());
@@ -72,7 +72,7 @@ export function TenantForm({ tenant }: { tenant: Tenant }) {
             </div>
           )}
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Upload a logo for your tenant. Recommended size: 256x256px.</p>
+            <p className="text-sm text-muted-foreground">Upload a logo for your company. Recommended size: 256x256px.</p>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="size-4 mr-1.5" />
@@ -102,9 +102,9 @@ export function TenantForm({ tenant }: { tenant: Tenant }) {
         </div>
       </div>
 
-      {/* Tenant Details */}
+      {/* Company Details */}
       <div className="rounded-lg border border-muted-foreground/25 p-5">
-        <SectionHeader title="Tenant Details" />
+        <SectionHeader title="Company Details" />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <FormField label="Name">
             <Input value={name} onChange={(e) => setName(e.target.value)} />

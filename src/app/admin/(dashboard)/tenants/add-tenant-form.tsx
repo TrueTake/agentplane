@@ -59,13 +59,13 @@ export function AddTenantForm() {
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>Add Tenant</Button>
+      <Button size="sm" onClick={() => setOpen(true)}>Add Company</Button>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else setOpen(true); }}>
         <DialogContent className="max-w-md">
           {apiKey ? (
             <>
               <DialogHeader>
-                <DialogTitle>Tenant Created</DialogTitle>
+                <DialogTitle>Company Created</DialogTitle>
               </DialogHeader>
               <DialogBody className="space-y-3">
                 <p className="text-sm text-muted-foreground">
@@ -82,7 +82,7 @@ export function AddTenantForm() {
           ) : (
             <form onSubmit={handleSubmit}>
               <DialogHeader>
-                <DialogTitle>Add Tenant</DialogTitle>
+                <DialogTitle>Add Company</DialogTitle>
               </DialogHeader>
               <DialogBody className="space-y-3">
                 <FormField label="Name">

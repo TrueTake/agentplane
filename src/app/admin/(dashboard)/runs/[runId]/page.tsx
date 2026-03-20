@@ -141,7 +141,7 @@ export default async function RunDetailPage({
               <dd className="font-mono">{run.id}</dd>
               <dt className="text-muted-foreground">Agent ID</dt>
               <dd className="font-mono">{run.agent_id}</dd>
-              <dt className="text-muted-foreground">Tenant ID</dt>
+              <dt className="text-muted-foreground">Company ID</dt>
               <dd className="font-mono">{run.tenant_id}</dd>
               <dt className="text-muted-foreground">Sandbox ID</dt>
               <dd className="font-mono">{run.sandbox_id || "—"}</dd>

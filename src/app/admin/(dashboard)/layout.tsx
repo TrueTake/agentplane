@@ -2,7 +2,7 @@ import Script from "next/script";
 import { LogoutButton } from "./logout-button";
 import { SidebarNav } from "./sidebar-nav";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { TenantSwitcher } from "@/components/layout/tenant-switcher";
+import { CompanySwitcher } from "@/components/layout/company-switcher";
 import { TopBar } from "@/components/layout/top-bar";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -18,7 +18,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
         {/* Sidebar */}
         <aside className="w-56 border-r border-border flex flex-col shrink-0">
-          <TenantSwitcher />
+          <CompanySwitcher />
           <SidebarNav />
           <div className="p-2 border-t border-border flex items-center justify-between">
             <LogoutButton />

@@ -36,7 +36,7 @@ export default async function TenantsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Tenants</h1>
+        <h1 className="text-2xl font-semibold">Companies</h1>
         <AddTenantForm />
       </div>
       <AdminTable>
@@ -73,7 +73,7 @@ export default async function TenantsPage() {
               </td>
             </AdminTableRow>
           ))}
-          {tenants.length === 0 && <EmptyRow colSpan={8}>No tenants found</EmptyRow>}
+          {tenants.length === 0 && <EmptyRow colSpan={8}>No companies found</EmptyRow>}
         </tbody>
       </AdminTable>
     </div>

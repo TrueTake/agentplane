@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { query, queryOne } from "@/db";
 import { TenantRow, ApiKeyRow } from "@/lib/validation";
-import { TenantForm } from "./tenant-form";
+import { CompanyForm } from "./company-form";
 import { ApiKeysSection } from "./api-keys-section";
-import { DeleteTenantButton } from "./delete-tenant-button";
+import { DeleteCompanyButton } from "./delete-company-button";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export default async function SettingsPage() {
   if (!tenantId) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <p className="text-muted-foreground">Select a tenant from the sidebar to view settings.</p>
+        <p className="text-muted-foreground">Select a company from the sidebar to view settings.</p>
       </div>
     );
   }
@@ -24,7 +24,7 @@ export default async function SettingsPage() {
   if (!tenant) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <p className="text-muted-foreground">Tenant not found. Select a different tenant from the sidebar.</p>
+        <p className="text-muted-foreground">Company not found. Select a different company from the sidebar.</p>
       </div>
     );
   }
@@ -39,7 +39,7 @@ export default async function SettingsPage() {
   return (
     <div className="space-y-6">
       {/* Tenant Details */}
-      <TenantForm tenant={{
+      <CompanyForm tenant={{
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
@@ -58,10 +58,10 @@ export default async function SettingsPage() {
           <div>
             <h2 className="text-lg font-semibold text-destructive">Danger Zone</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Permanently delete this tenant and all its agents, runs, sessions, and API keys.
+              Permanently delete this company and all its agents, runs, sessions, and API keys.
             </p>
           </div>
-          <DeleteTenantButton tenantId={tenant.id} tenantName={tenant.name} />
+          <DeleteCompanyButton tenantId={tenant.id} tenantName={tenant.name} />
         </div>
       </div>
     </div>

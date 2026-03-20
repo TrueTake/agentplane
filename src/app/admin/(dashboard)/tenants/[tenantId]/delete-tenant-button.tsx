@@ -43,19 +43,19 @@ export function DeleteTenantButton({ tenantId, tenantName }: Props) {
         className="text-muted-foreground hover:text-destructive text-xs"
         onClick={() => setStep(1)}
       >
-        Delete Tenant
+        Delete Company
       </Button>
 
       {/* Step 1 */}
       <ConfirmDialog
         open={step === 1}
         onOpenChange={(open) => !open && setStep(0)}
-        title="Delete Tenant"
+        title="Delete Company"
         confirmLabel="Continue"
         loadingLabel="Loading..."
         onConfirm={() => setStep(2)}
       >
-        Delete <span className="font-medium text-foreground">{tenantName}</span>? This will permanently remove all agents, runs, sessions, and API keys belonging to this tenant.
+        Delete <span className="font-medium text-foreground">{tenantName}</span>? This will permanently remove all agents, runs, sessions, and API keys belonging to this company.
       </ConfirmDialog>
 
       {/* Step 2 */}
@@ -63,7 +63,7 @@ export function DeleteTenantButton({ tenantId, tenantName }: Props) {
         open={step === 2}
         onOpenChange={(open) => { if (!open) setStep(0); setError(""); }}
         title="Are you absolutely sure?"
-        confirmLabel="Delete Tenant"
+        confirmLabel="Delete Company"
         loadingLabel="Deleting..."
         loading={deleting}
         error={error}

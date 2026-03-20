@@ -34,7 +34,7 @@ export default async function AgentsPage() {
   if (!tenantId) {
     return (
       <div className="text-muted-foreground text-sm py-12 text-center">
-        Select a tenant from the sidebar.
+        Select a company from the sidebar.
       </div>
     );
   }

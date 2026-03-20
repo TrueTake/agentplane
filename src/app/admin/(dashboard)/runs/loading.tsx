@@ -8,7 +8,7 @@ export default function RunsLoading() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/50">
-              {["Run", "Agent", "Tenant", "Status", "Prompt", "Cost", "Turns", "Duration", "Created"].map((h) => (
+              {["Run", "Agent", "Company", "Status", "Prompt", "Cost", "Turns", "Duration", "Created"].map((h) => (
                 <th key={h} className="text-left p-3 font-medium text-muted-foreground">{h}</th>
               ))}
             </tr>

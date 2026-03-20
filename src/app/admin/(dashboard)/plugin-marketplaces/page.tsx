@@ -24,7 +24,7 @@ export default async function PluginMarketplacesPage() {
   if (!tenantId) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
-        Select a tenant from the sidebar.
+        Select a company from the sidebar.
       </div>
     );
   }

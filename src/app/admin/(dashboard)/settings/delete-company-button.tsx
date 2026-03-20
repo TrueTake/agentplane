@@ -10,7 +10,7 @@ interface Props {
   tenantName: string;
 }
 
-export function DeleteTenantButton({ tenantId, tenantName }: Props) {
+export function DeleteCompanyButton({ tenantId, tenantName }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -40,14 +40,14 @@ export function DeleteTenantButton({ tenantId, tenantName }: Props) {
   return (
     <>
       <Button size="sm" variant="destructive" onClick={() => setOpen(true)}>
-        Delete Tenant
+        Delete Company
       </Button>
 
       <ConfirmDialog
         open={open}
         onOpenChange={(v) => { if (!v) { setOpen(false); setError(""); } }}
-        title="Delete Tenant"
-        confirmLabel="Delete Tenant"
+        title="Delete Company"
+        confirmLabel="Delete Company"
         loadingLabel="Deleting..."
         loading={deleting}
         error={error}
