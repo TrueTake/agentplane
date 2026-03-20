@@ -12,18 +12,21 @@ export function Tabs({ tabs, defaultTab = 0 }: { tabs: Tab[]; defaultTab?: numbe
 
   return (
     <div>
-      <div className="flex gap-1 border-b border-zinc-800">
+      <div className="flex gap-4">
         {tabs.map((tab, i) => (
           <button
             key={tab.label}
             onClick={() => setActive(i)}
-            className={`px-4 py-2 text-sm font-medium transition-colors -mb-px ${
+            className={`relative pb-2 text-sm font-medium transition-colors ${
               active === i
-                ? "border-b-2 border-white text-white"
-                : "text-zinc-400 hover:text-zinc-200"
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {tab.label}
+            {active === i && (
+              <span className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground rounded-full" />
+            )}
           </button>
         ))}
       </div>
