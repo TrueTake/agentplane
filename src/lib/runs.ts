@@ -2,6 +2,7 @@ import { z } from "zod";
 import { query, queryOne, execute, withTenantTransaction } from "@/db";
 import { RunRow, AgentRowInternal, AgentInternal } from "./validation";
 import { generateId } from "./crypto";
+import { resolveEffectiveRunner } from "./models";
 import { logger } from "./logger";
 import {
   NotFoundError,
@@ -76,13 +77,14 @@ export async function createRun(
     const scheduleId = options?.scheduleId ?? null;
     const sessionId = options?.sessionId ?? null;
     const createdByKeyId = options?.createdByKeyId ?? null;
+    const effectiveRunner = resolveEffectiveRunner(agent.model, agent.runner);
     const inserted = await tx.queryOne(
       RunRow,
-      `INSERT INTO runs (id, agent_id, tenant_id, status, prompt, triggered_by, schedule_id, session_id, created_by_key_id, created_at)
-       SELECT $1, $2, $3, 'pending', $4, $5, $6, $7, $8, NOW()
-       WHERE (SELECT COUNT(*) FROM runs WHERE tenant_id = $3 AND status IN ('pending', 'running')) < $9
+      `INSERT INTO runs (id, agent_id, tenant_id, status, prompt, runner, triggered_by, schedule_id, session_id, created_by_key_id, created_at)
+       SELECT $1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, NOW()
+       WHERE (SELECT COUNT(*) FROM runs WHERE tenant_id = $3 AND status IN ('pending', 'running')) < $10
        RETURNING *`,
-      [runId, agentId, tenantId, prompt, triggeredBy, scheduleId, sessionId, createdByKeyId, MAX_CONCURRENT_RUNS],
+      [runId, agentId, tenantId, prompt, effectiveRunner, triggeredBy, scheduleId, sessionId, createdByKeyId, MAX_CONCURRENT_RUNS],
     );
 
     if (!inserted) {
