@@ -20,10 +20,10 @@ export function AgentTabs({
     <Tabs
       tabs={[
         { label: "General", content: general },
-        { label: "Runs", content: runs },
         { label: "Connectors", content: connectors },
         { label: "Plugins & Skills", content: pluginsAndSkills },
         { label: "Schedules", content: schedules },
+        { label: "Runs", content: runs },
       ]}
     />
   );
