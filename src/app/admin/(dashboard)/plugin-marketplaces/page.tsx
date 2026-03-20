@@ -30,7 +30,7 @@ export default async function PluginMarketplacesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center">
         <AddMarketplaceForm />
       </div>
 

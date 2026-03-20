@@ -73,8 +73,8 @@ export function ApiKeysSection({ tenantId, initialKeys }: { tenantId: string; in
   return (
     <div className="rounded-lg border border-muted-foreground/25 p-5">
       <SectionHeader title="API Keys">
-        <Button size="sm" onClick={() => setShowCreate(!showCreate)}>
-          {showCreate ? "Cancel" : "Create Key"}
+        <Button variant="outline" size="sm" onClick={() => setShowCreate(!showCreate)}>
+          {showCreate ? "Cancel" : "+ New Key"}
         </Button>
       </SectionHeader>
 

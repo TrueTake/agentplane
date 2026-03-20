@@ -90,7 +90,7 @@ export function AddAgentForm({ tenants, defaultTenantId }: Props) {
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>Add Agent</Button>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>+ New Agent</Button>
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm(); }}>
         <DialogContent className="max-w-md">
           <form onSubmit={handleSubmit}>

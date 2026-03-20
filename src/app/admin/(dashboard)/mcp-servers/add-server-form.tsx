@@ -65,7 +65,7 @@ export function AddMcpServerForm() {
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>Register Connector</Button>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>+ New Connector</Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <form onSubmit={handleSubmit}>
