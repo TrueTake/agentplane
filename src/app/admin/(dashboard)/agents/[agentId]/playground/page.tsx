@@ -140,7 +140,7 @@ function renderEvent(event: PlaygroundEvent, idx: number) {
         )}
         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-2">
           {event.num_turns != null && <span>{String(event.num_turns)} turns</span>}
-          {costUsd != null && <span>${Number(costUsd).toFixed(4)}</span>}
+          {costUsd != null && Number(costUsd) > 0 && <span>${Number(costUsd).toFixed(4)}</span>}
           {event.duration_ms != null && <span>{(Number(event.duration_ms) / 1000).toFixed(1)}s</span>}
           {event.duration_api_ms != null && <span>API: {(Number(event.duration_api_ms) / 1000).toFixed(1)}s</span>}
         </div>
