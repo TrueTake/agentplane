@@ -20,7 +20,9 @@ function formatContextWindow(tokens: number | null): string {
 
 function formatPrice(perMillion: number | null): string {
   if (perMillion == null) return "—";
-  if (perMillion < 0.01) return `$${perMillion}/M`;
+  if (perMillion === 0) return "Free";
+  if (perMillion < 0.001) return `<$0.01/M`;
+  if (perMillion < 0.01) return `$${perMillion.toFixed(3)}/M`;
   if (perMillion < 1) return `$${perMillion.toFixed(2)}/M`;
   return `$${perMillion % 1 === 0 ? perMillion : perMillion.toFixed(2)}/M`;
 }
@@ -176,7 +178,7 @@ export function ModelSelector({ value, onChange, disabled }: ModelSelectorProps)
 
       <Popover.Portal>
         <Popover.Content
-          className="z-50 w-[600px] rounded-lg border border-muted-foreground/25 bg-card shadow-xl"
+          className="dark z-50 w-[600px] rounded-lg border border-muted-foreground/25 bg-card text-card-foreground shadow-xl"
           sideOffset={4}
           align="start"
           onOpenAutoFocus={(e) => e.preventDefault()}
@@ -206,7 +208,7 @@ export function ModelSelector({ value, onChange, disabled }: ModelSelectorProps)
                 <select
                   value={providerFilter}
                   onChange={(e) => setProviderFilter(e.target.value)}
-                  className="h-7 rounded border border-muted-foreground/25 bg-transparent px-2 text-xs text-muted-foreground outline-none"
+                  className="h-7 rounded border border-muted-foreground/25 bg-card px-2 text-xs text-muted-foreground outline-none [&_option]:bg-card [&_option]:text-foreground"
                 >
                   <option value="all">All Providers</option>
                   {providers.map((p) => (

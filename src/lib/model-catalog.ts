@@ -85,10 +85,11 @@ let lastKnownGood: CatalogModel[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
+/** Parse gateway price (cost per token) and convert to cost per million tokens. */
 function parsePrice(value: string | null): number | null {
   if (!value) return null;
   const num = parseFloat(value);
-  return isNaN(num) ? null : num;
+  return isNaN(num) ? null : num * 1_000_000;
 }
 
 function deriveProvider(id: string, ownedBy: string): string {
