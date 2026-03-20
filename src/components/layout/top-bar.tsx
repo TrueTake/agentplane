@@ -72,13 +72,25 @@ export function TopBar() {
       crumbs.push({ label, href, isEntityId: false });
       parentRoute = href;
     } else {
-      // Detail page — will resolve name
-      entityId = segments[i];
-      crumbs.push({
-        label: segments[i].length > 12 ? segments[i].slice(0, 8) + "..." : segments[i],
-        href,
-        isEntityId: true,
-      });
+      // Check if this is a known sub-page name (e.g. "playground")
+      const subPageLabels: Record<string, string> = {
+        playground: "Playground",
+        plugins: "Plugins",
+        connectors: "Connectors",
+        schedule: "Schedule",
+      };
+      const subLabel = subPageLabels[segments[i]];
+      if (subLabel) {
+        crumbs.push({ label: subLabel, href, isEntityId: false });
+      } else {
+        // Detail page — will resolve name
+        entityId = segments[i];
+        crumbs.push({
+          label: segments[i].length > 12 ? segments[i].slice(0, 8) + "..." : segments[i],
+          href,
+          isEntityId: true,
+        });
+      }
     }
   }
 

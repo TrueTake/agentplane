@@ -3,7 +3,6 @@
 import { use, useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { DetailPageHeader } from "@/components/ui/detail-page-header";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -529,20 +528,19 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
 
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)]">
-      <div className="mb-4">
-        <DetailPageHeader
-          backHref={`/admin/agents/${agentId}`}
-          backLabel="Agent"
-          title="Playground"
-          subtitle={sessionId ? <span className="text-xs text-muted-foreground font-mono">Session: {sessionId.slice(0, 12)}…</span> : undefined}
-          actions={
-            (sessionId || events.length > 0) ? (
-              <Button onClick={handleNewChat} variant="outline" size="sm" disabled={running}>
-                New Chat
-              </Button>
-            ) : undefined
-          }
-        />
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          {sessionId && (
+            <span className="text-xs text-muted-foreground font-mono">
+              Session: {sessionId.slice(0, 12)}…
+            </span>
+          )}
+        </div>
+        {(sessionId || events.length > 0) && (
+          <Button onClick={handleNewChat} variant="outline" size="sm" disabled={running}>
+            New Chat
+          </Button>
+        )}
       </div>
 
       {/* Scrollable output area */}
