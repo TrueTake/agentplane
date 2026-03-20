@@ -331,6 +331,10 @@ export async function createSandbox(config: SandboxConfig): Promise<SandboxInsta
     mcpServersForRunner['agentco'] = {
       command: 'node',
       args: ['/vercel/sandbox/agentco-bridge.mjs'],
+      env: {
+        AGENTCO_CALLBACK_URL: config.callbackData.url,
+        AGENTCO_CALLBACK_TOKEN: config.callbackData.token,
+      },
     };
     env.AGENTCO_CALLBACK_URL = config.callbackData.url;
     env.AGENTCO_CALLBACK_TOKEN = config.callbackData.token;
@@ -874,6 +878,10 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
     mcpServersForSession['agentco'] = {
       command: 'node',
       args: ['/vercel/sandbox/agentco-bridge.mjs'],
+      env: {
+        AGENTCO_CALLBACK_URL: config.callbackData.url,
+        AGENTCO_CALLBACK_TOKEN: config.callbackData.token,
+      },
     };
     baseEnv.AGENTCO_CALLBACK_URL = config.callbackData.url;
     baseEnv.AGENTCO_CALLBACK_TOKEN = config.callbackData.token;

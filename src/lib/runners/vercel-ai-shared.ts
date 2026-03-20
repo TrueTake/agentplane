@@ -218,7 +218,7 @@ try {
         let transport;
         if (cfg.command) {
           const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-          transport = new StdioClientTransport({ command: cfg.command, args: cfg.args || [] });
+          transport = new StdioClientTransport({ command: cfg.command, args: cfg.args || [], env: { ...process.env, ...(cfg.env || {}) } });
         } else if (cfg.url) {
           transport = { type: 'http', url: cfg.url, headers: cfg.headers || {} };
         } else {
