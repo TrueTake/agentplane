@@ -6,6 +6,10 @@ import { SessionsResource } from "./resources/sessions";
 import { ConnectorsResource } from "./resources/connectors";
 import { CustomConnectorsResource } from "./resources/custom-connectors";
 import { PluginMarketplacesResource } from "./resources/plugin-marketplaces";
+import { ModelsResource } from "./resources/models";
+import { DashboardResource } from "./resources/dashboard";
+import { TenantsResource } from "./resources/tenants";
+import { ComposioResource } from "./resources/composio";
 
 const VERSION = "0.2.1";
 const MAX_ERROR_BODY_BYTES = 64 * 1024; // 64KB
@@ -17,6 +21,10 @@ export class AgentPlane {
   readonly connectors: ConnectorsResource;
   readonly customConnectors: CustomConnectorsResource;
   readonly pluginMarketplaces: PluginMarketplacesResource;
+  readonly models: ModelsResource;
+  readonly dashboard: DashboardResource;
+  readonly tenants: TenantsResource;
+  readonly composio: ComposioResource;
 
   private readonly _getAuthHeader: () => string;
   private readonly _baseUrl: string;
@@ -82,6 +90,10 @@ export class AgentPlane {
     this.runs = new RunsResource(this);
     this.sessions = new SessionsResource(this);
     this.agents = new AgentsResource(this, connectors, customConnectors);
+    this.models = new ModelsResource(this);
+    this.dashboard = new DashboardResource(this);
+    this.tenants = new TenantsResource(this);
+    this.composio = new ComposioResource(this);
   }
 
   /** @internal Make a JSON API request. */

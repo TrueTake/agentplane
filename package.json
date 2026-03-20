@@ -1,5 +1,5 @@
 {
-  "name": "agent-plane",
+  "name": "@getcatalystiq/agent-plane",
   "version": "0.1.0",
   "private": true,
   "description": "A multi-tenant platform for running Claude Code agents in isolated Vercel Sandboxes, exposed via a REST API.",
@@ -24,7 +24,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -34,7 +34,9 @@
     "create-tenant": "npx tsx scripts/create-tenant.ts",
     "sdk:build": "npm run --prefix sdk build",
     "sdk:test": "npm run --prefix sdk test",
-    "sdk:typecheck": "npm run --prefix sdk typecheck"
+    "sdk:typecheck": "npm run --prefix sdk typecheck",
+    "ui:build": "npm run --prefix ui build",
+    "ui:typecheck": "npm run --prefix ui typecheck"
   },
   "dependencies": {
     "@a2a-js/sdk": "0.3.12",

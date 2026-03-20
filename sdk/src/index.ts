@@ -40,6 +40,15 @@ export type {
   // Plugin Marketplaces
   PluginMarketplace,
   PluginListItem,
+  // Models
+  CatalogModel,
+  // Dashboard
+  DashboardStats,
+  DailyAgentStat,
+  DashboardChartsParams,
+  // Tenant
+  Tenant,
+  UpdateTenantParams,
   // Stream Events
   StreamEvent,
   RunStartedEvent,

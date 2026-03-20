@@ -376,6 +376,63 @@ export type RawStreamEvent =
   | StreamEvent
   | { type: "heartbeat"; timestamp: string };
 
+// --- Models ---
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  provider: string;
+  context_window?: number | undefined;
+  input_price_per_million?: number | undefined;
+  output_price_per_million?: number | undefined;
+  capabilities?: string[] | undefined;
+}
+
+// --- Dashboard ---
+
+export interface DashboardStats {
+  agent_count: number;
+  total_runs: number;
+  active_runs: number;
+  total_spend: number;
+  session_count: number;
+}
+
+export interface DailyAgentStat {
+  date: string;
+  agent_name: string;
+  run_count: number;
+  cost_usd: number;
+}
+
+export interface DashboardChartsParams {
+  /** Number of days to look back (1-90, default 30). */
+  days?: number | undefined;
+}
+
+// --- Tenant ---
+
+export interface Tenant {
+  id: string;
+  name: string;
+  slug: string;
+  settings: Record<string, unknown>;
+  monthly_budget_usd: number;
+  status: "active" | "suspended";
+  current_month_spend: number;
+  timezone: string;
+  logo_url: string | null;
+  spend_period_start: string;
+  created_at: string;
+}
+
+export interface UpdateTenantParams {
+  name?: string | undefined;
+  timezone?: string | undefined;
+  monthly_budget_usd?: number | undefined;
+  logo_url?: string | null | undefined;
+}
+
 // --- Known Event Types ---
 
 export const KNOWN_EVENT_TYPES = new Set([
