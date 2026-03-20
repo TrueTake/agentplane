@@ -568,7 +568,7 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
           placeholder={sessionId ? "Send a follow-up message…" : "Enter your prompt…"}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          rows={hasContent ? 2 : 5}
+          rows={hasContent ? 3 : 12}
           disabled={running}
           className="font-mono text-sm resize-none"
           onKeyDown={(e) => {

@@ -341,6 +341,7 @@ ${historyUpdate}
     emit({
       type: 'result',
       subtype: 'success',
+      result: fullText || '',
       total_cost_usd: 0,
       num_turns: steps?.length || 0,
       duration_ms: durationMs,

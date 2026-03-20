@@ -10,6 +10,7 @@ import { ConnectorsManager } from "./connectors-manager";
 import { PluginsManager } from "./plugins-manager";
 import { ScheduleEditor } from "./schedule-editor";
 import { AgentHeaderActions } from "./header-actions";
+import { AgentTabs } from "./agent-tabs";
 import { getCallbackBaseUrl } from "@/lib/mcp-connections";
 
 export const dynamic = "force-dynamic";
@@ -52,31 +53,39 @@ export default async function AgentDetailPage({
         <MetricCard label="Plugins">{agent.plugins.length}</MetricCard>
       </div>
 
-      <AgentEditForm agent={agent} />
-
-      {tenant && (
-        <A2aInfoSection
-          agentId={agent.id}
-          tenantSlug={tenant.slug}
-          agentSlug={agent.slug}
-          baseUrl={getCallbackBaseUrl()}
-          initialEnabled={agent.a2a_enabled}
-          initialTags={agent.a2a_tags}
-        />
-      )}
-
-      <ConnectorsManager agentId={agent.id} toolkits={agent.composio_toolkits} composioAllowedTools={agent.composio_allowed_tools} hasPlugins={agent.plugins.length > 0} />
-
-      <PluginsManager agentId={agent.id} initialPlugins={agent.plugins} />
-
-      <SkillsEditor agentId={agent.id} initialSkills={agent.skills} />
-
-      <ScheduleEditor
-        agentId={agent.id}
-        initialSchedules={schedules}
-        timezone={tenant?.timezone ?? "UTC"}
+      <AgentTabs
+        general={
+          <div className="space-y-6">
+            <AgentEditForm agent={agent} />
+            {tenant && (
+              <A2aInfoSection
+                agentId={agent.id}
+                tenantSlug={tenant.slug}
+                agentSlug={agent.slug}
+                baseUrl={getCallbackBaseUrl()}
+                initialEnabled={agent.a2a_enabled}
+                initialTags={agent.a2a_tags}
+              />
+            )}
+          </div>
+        }
+        connectors={
+          <ConnectorsManager agentId={agent.id} toolkits={agent.composio_toolkits} composioAllowedTools={agent.composio_allowed_tools} hasPlugins={agent.plugins.length > 0} />
+        }
+        pluginsAndSkills={
+          <div className="space-y-6">
+            <PluginsManager agentId={agent.id} initialPlugins={agent.plugins} />
+            <SkillsEditor agentId={agent.id} initialSkills={agent.skills} />
+          </div>
+        }
+        schedules={
+          <ScheduleEditor
+            agentId={agent.id}
+            initialSchedules={schedules}
+            timezone={tenant?.timezone ?? "UTC"}
+          />
+        }
       />
-
     </div>
   );
 }
