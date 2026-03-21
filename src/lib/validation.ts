@@ -320,8 +320,8 @@ export const RunStatusSchema = z.enum([
 // --- Pagination ---
 
 export const PaginationSchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.number().int().min(1).max(100).default(20)),
+  offset: z.preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.number().int().min(0).default(0)),
 });
 
 // --- DB Row Schemas (for typed query helper) ---
