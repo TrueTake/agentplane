@@ -206,7 +206,9 @@ export async function transitionRunStatus(
 export async function getRun(runId: string, tenantId: TenantId) {
   const run = await queryOne(
     RunRow,
-    "SELECT * FROM runs WHERE id = $1 AND tenant_id = $2",
+    `SELECT r.*, a.name AS agent_name, a.model AS agent_model
+     FROM runs r LEFT JOIN agents a ON r.agent_id = a.id
+     WHERE r.id = $1 AND r.tenant_id = $2`,
     [runId, tenantId],
   );
   if (!run) throw new NotFoundError("Run not found");
@@ -245,7 +247,7 @@ export async function listRuns(
   params.push(options.limit, options.offset);
   return query(
     RunRow,
-    `SELECT r.*, a.name AS agent_name FROM runs r
+    `SELECT r.*, a.name AS agent_name, a.model AS agent_model FROM runs r
      LEFT JOIN agents a ON r.agent_id = a.id
      WHERE ${conditions.join(" AND ")}
      ORDER BY r.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
