@@ -217,27 +217,27 @@ export async function listRuns(
   tenantId: TenantId,
   options: { agentId?: string; sessionId?: string; status?: RunStatus; triggeredBy?: RunTriggeredBy; limit: number; offset: number },
 ) {
-  const conditions = ["tenant_id = $1"];
+  const conditions = ["r.tenant_id = $1"];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
   if (options.agentId) {
-    conditions.push(`agent_id = $${idx}`);
+    conditions.push(`r.agent_id = $${idx}`);
     params.push(options.agentId);
     idx++;
   }
   if (options.sessionId) {
-    conditions.push(`session_id = $${idx}`);
+    conditions.push(`r.session_id = $${idx}`);
     params.push(options.sessionId);
     idx++;
   }
   if (options.status) {
-    conditions.push(`status = $${idx}`);
+    conditions.push(`r.status = $${idx}`);
     params.push(options.status);
     idx++;
   }
   if (options.triggeredBy) {
-    conditions.push(`triggered_by = $${idx}`);
+    conditions.push(`r.triggered_by = $${idx}`);
     params.push(options.triggeredBy);
     idx++;
   }
@@ -245,8 +245,10 @@ export async function listRuns(
   params.push(options.limit, options.offset);
   return query(
     RunRow,
-    `SELECT * FROM runs WHERE ${conditions.join(" AND ")}
-     ORDER BY created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
+    `SELECT r.*, a.name AS agent_name FROM runs r
+     LEFT JOIN agents a ON r.agent_id = a.id
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY r.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
     params,
   );
 }
