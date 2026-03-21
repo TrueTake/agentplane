@@ -49,7 +49,7 @@ export function PluginMarketplaceDetailPage({ marketplaceId, initialData, initia
 
   const { data: marketplace, error, isLoading } = useApi<MarketplaceDetail>(
     `marketplace-${marketplaceId}`,
-    (c) => c.pluginMarketplaces.get!(marketplaceId) as Promise<MarketplaceDetail>,
+    (c) => c.pluginMarketplaces.get(marketplaceId) as Promise<MarketplaceDetail>,
     initialData ? { fallbackData: initialData } : undefined,
   );
 
@@ -65,7 +65,7 @@ export function PluginMarketplaceDetailPage({ marketplaceId, initialData, initia
   async function handleSaveToken() {
     setSavingToken(true);
     try {
-      await client.pluginMarketplaces.updateToken!(marketplaceId, { github_token: tokenInput });
+      await client.pluginMarketplaces.updateToken(marketplaceId, { github_token: tokenInput });
       setTokenInput("");
       mutate(`marketplace-${marketplaceId}`);
       mutate(`marketplace-${marketplaceId}-plugins`);

@@ -2,9 +2,8 @@ import type { AgentPlane } from "../client";
 import type { PluginMarketplace, PluginListItem } from "../types";
 
 /**
- * Plugin marketplace discovery. Provides read-only access to the global
- * marketplace registry. Marketplace creation/deletion/token management
- * requires admin access and is not available through tenant API keys.
+ * Plugin marketplace management. Provides CRUD access to the tenant-scoped
+ * marketplace registry.
  */
 export class PluginMarketplacesResource {
   constructor(private readonly _client: AgentPlane) {}
@@ -16,6 +15,40 @@ export class PluginMarketplacesResource {
       "/api/plugin-marketplaces",
     );
     return resp.data;
+  }
+
+  /** Get a single marketplace by ID. */
+  async get(marketplaceId: string): Promise<PluginMarketplace> {
+    return this._client._request<PluginMarketplace>(
+      "GET",
+      `/api/plugin-marketplaces/${encodeURIComponent(marketplaceId)}`,
+    );
+  }
+
+  /** Create a new marketplace. */
+  async create(data: { name: string; github_repo: string; github_token?: string }): Promise<PluginMarketplace> {
+    return this._client._request<PluginMarketplace>(
+      "POST",
+      "/api/plugin-marketplaces",
+      data,
+    );
+  }
+
+  /** Delete a marketplace. */
+  async delete(marketplaceId: string): Promise<{ deleted: boolean }> {
+    return this._client._request<{ deleted: boolean }>(
+      "DELETE",
+      `/api/plugin-marketplaces/${encodeURIComponent(marketplaceId)}`,
+    );
+  }
+
+  /** Update marketplace token. */
+  async updateToken(marketplaceId: string, data: { github_token: string | null }): Promise<PluginMarketplace> {
+    return this._client._request<PluginMarketplace>(
+      "PATCH",
+      `/api/plugin-marketplaces/${encodeURIComponent(marketplaceId)}`,
+      data,
+    );
   }
 
   /** List plugins in a marketplace. */

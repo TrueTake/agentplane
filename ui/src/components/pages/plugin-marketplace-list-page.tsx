@@ -10,6 +10,9 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { AdminTable, AdminTableHead, AdminTableRow, Th, EmptyRow } from "../ui/admin-table";
 import { ConfirmDialog } from "../ui/confirm-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "../ui/dialog";
+import { FormField } from "../ui/form-field";
+import { FormError } from "../ui/form-error";
 import { Skeleton } from "../ui/skeleton";
 
 interface Marketplace {
@@ -38,19 +41,28 @@ export function PluginMarketplaceListPage({ initialData }: PluginMarketplaceList
 
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState("");
   const [newMarketplace, setNewMarketplace] = useState({ name: "", github_repo: "" });
 
   const [deleteTarget, setDeleteTarget] = useState<Marketplace | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
+  function resetAddForm() {
+    setNewMarketplace({ name: "", github_repo: "" });
+    setAddError("");
+  }
+
   async function handleAdd() {
     setAdding(true);
+    setAddError("");
     try {
-      await client.pluginMarketplaces.create!(newMarketplace);
+      await client.pluginMarketplaces.create(newMarketplace);
       setShowAdd(false);
-      setNewMarketplace({ name: "", github_repo: "" });
+      resetAddForm();
       mutate("plugin-marketplaces");
+    } catch (err: any) {
+      setAddError(err?.message ?? "Failed to add marketplace");
     } finally {
       setAdding(false);
     }
@@ -61,7 +73,7 @@ export function PluginMarketplaceListPage({ initialData }: PluginMarketplaceList
     setDeleting(true);
     setDeleteError("");
     try {
-      await client.pluginMarketplaces.delete!(deleteTarget.id);
+      await client.pluginMarketplaces.delete(deleteTarget.id);
       setDeleteTarget(null);
       mutate("plugin-marketplaces");
     } catch (err) {
@@ -86,22 +98,41 @@ export function PluginMarketplaceListPage({ initialData }: PluginMarketplaceList
   return (
     <div className="space-y-6">
       <div className="flex items-center">
-        <Button variant="outline" size="sm" onClick={() => setShowAdd(!showAdd)}>
-          {showAdd ? "Cancel" : "Add Marketplace"}
+        <Button variant="outline" size="sm" onClick={() => setShowAdd(true)}>
+          + Add Marketplace
         </Button>
       </div>
 
-      {showAdd && (
-        <div className="rounded-lg border border-border p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Input placeholder="Name" value={newMarketplace.name} onChange={(e) => setNewMarketplace({ ...newMarketplace, name: e.target.value })} />
-            <Input placeholder="GitHub Repo (owner/repo)" value={newMarketplace.github_repo} onChange={(e) => setNewMarketplace({ ...newMarketplace, github_repo: e.target.value })} />
-          </div>
-          <Button size="sm" onClick={handleAdd} disabled={adding || !newMarketplace.name || !newMarketplace.github_repo}>
-            {adding ? "Adding..." : "Add Marketplace"}
-          </Button>
-        </div>
-      )}
+      <Dialog open={showAdd} onOpenChange={(v) => { setShowAdd(v); if (!v) resetAddForm(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Marketplace</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="space-y-3">
+            <FormField label="Name">
+              <Input
+                value={newMarketplace.name}
+                onChange={(e) => setNewMarketplace({ ...newMarketplace, name: e.target.value })}
+                placeholder="My Marketplace"
+              />
+            </FormField>
+            <FormField label="GitHub Repo">
+              <Input
+                value={newMarketplace.github_repo}
+                onChange={(e) => setNewMarketplace({ ...newMarketplace, github_repo: e.target.value })}
+                placeholder="owner/repo"
+              />
+            </FormField>
+            <FormError error={addError} />
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { setShowAdd(false); resetAddForm(); }}>Cancel</Button>
+            <Button size="sm" onClick={handleAdd} disabled={adding || !newMarketplace.name || !newMarketplace.github_repo}>
+              {adding ? "Adding..." : "Add Marketplace"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AdminTable>
         <AdminTableHead>
