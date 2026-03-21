@@ -77,7 +77,6 @@ export type PluginMarketplace = z.infer<typeof PluginMarketplaceRow>;
 
 export const PluginMarketplacePublicRow = z.object({
   id: z.string(),
-  tenant_id: z.string(),
   name: z.string(),
   github_repo: z.string(),
   created_at: z.coerce.date(),
