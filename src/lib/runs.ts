@@ -19,11 +19,14 @@ const TenantBudgetRow = z.object({
   status: z.enum(["active", "suspended"]),
   monthly_budget_usd: z.coerce.number(),
   current_month_spend: z.coerce.number(),
+  has_subscription_token: z.boolean(),
 });
 
 /**
  * Check tenant suspension status and budget within a transaction.
  * Throws ForbiddenError if suspended, BudgetExceededError if over budget.
+ * Subscription tenants (with a Claude subscription token) bypass budget enforcement
+ * since their Claude usage is billed through the subscription, not per-token.
  * Returns remaining budget in USD.
  */
 export async function checkTenantBudget(
@@ -32,11 +35,15 @@ export async function checkTenantBudget(
 ): Promise<number> {
   const row = await tx.queryOne(
     TenantBudgetRow,
-    "SELECT status, monthly_budget_usd, current_month_spend FROM tenants WHERE id = $1",
+    "SELECT status, monthly_budget_usd, current_month_spend, subscription_token_enc IS NOT NULL AS has_subscription_token FROM tenants WHERE id = $1",
     [tenantId],
   );
   if (row?.status === "suspended") {
     throw new ForbiddenError("Tenant is suspended");
+  }
+  // Subscription tenants bypass budget enforcement — usage billed via subscription
+  if (row?.has_subscription_token) {
+    return Infinity;
   }
   if (row && row.current_month_spend >= row.monthly_budget_usd) {
     throw new BudgetExceededError(

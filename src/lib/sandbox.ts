@@ -687,12 +687,13 @@ function buildRunnerScript(config: SandboxConfig): string {
   const hasPluginContent = (config.pluginFiles ?? []).length > 0;
   const hasMcp = config.mcpServers && Object.keys(config.mcpServers).length > 0;
   const hasCallback = config.callbackData && config.callbackData.tools.length > 0;
+  const isSubscription = config.auth?.isSubscription ?? false;
   const agentConfig = {
     model: config.agent.model.replace(/(\d+)\.(\d+)/g, "$1-$2"),
     permissionMode: config.agent.permission_mode,
     ...(hasMcp || hasCallback ? {} : { allowedTools: config.agent.allowed_tools }),
     maxTurns: config.agent.max_turns,
-    maxBudgetUsd: config.agent.max_budget_usd,
+    ...(!isSubscription ? { maxBudgetUsd: config.agent.max_budget_usd } : {}),
     ...((hasSkills || hasPluginContent) ? { settingSources: ["project"] } : {}),
   };
 
@@ -998,6 +999,7 @@ function buildSessionSandboxInstance(
             sdkSessionId: opts.sdkSessionId,
             maxTurns: opts.maxTurns,
             maxBudgetUsd: opts.maxBudgetUsd,
+            isSubscription: config.auth?.isSubscription ?? false,
             hasSkillsOrPlugins: hasSkills || hasPluginContent,
             hasMcp: currentHasMcp,
             mcpErrors: currentMcpErrors,
@@ -1034,6 +1036,7 @@ interface SessionRunnerConfig {
   sdkSessionId: string | null;
   maxTurns: number;
   maxBudgetUsd: number;
+  isSubscription: boolean;
   hasSkillsOrPlugins: boolean;
   hasMcp: boolean;
   mcpErrors: string[];
@@ -1045,7 +1048,7 @@ function buildSessionRunnerScript(config: SessionRunnerConfig): string {
     permissionMode: config.agent.permission_mode,
     ...(config.hasMcp ? {} : { allowedTools: config.agent.allowed_tools }),
     maxTurns: config.maxTurns,
-    maxBudgetUsd: config.maxBudgetUsd,
+    ...(!config.isSubscription ? { maxBudgetUsd: config.maxBudgetUsd } : {}),
     ...(config.hasSkillsOrPlugins ? { settingSources: ["project"] } : {}),
     includePartialMessages: true,
   };

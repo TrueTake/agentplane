@@ -35,6 +35,7 @@ const TenantForBudgetRow = z.object({
   name: z.string(),
   monthly_budget_usd: z.coerce.number(),
   current_month_spend: z.coerce.number(),
+  has_subscription_token: z.boolean(),
 });
 
 type RouteContext = { params: Promise<{ slug: string; agentSlug: string }> };
@@ -105,7 +106,8 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
   // Resolve tenant info for budget enforcement (PK lookup — auth already verified tenantId)
   const sql = getHttpClient();
   const tenantRows = await sql`
-    SELECT id, name, monthly_budget_usd, current_month_spend
+    SELECT id, name, monthly_budget_usd, current_month_spend,
+           subscription_token_enc IS NOT NULL AS has_subscription_token
     FROM tenants WHERE id = ${auth.tenantId} AND status = 'active'
   `;
   if (tenantRows.length === 0) {
@@ -117,13 +119,16 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
   const tenant = TenantForBudgetRow.parse(tenantRows[0]);
 
   // Best-effort budget gate — authoritative check is inside createRun() (transactional)
-  if (tenant.current_month_spend >= tenant.monthly_budget_usd) {
+  // Subscription tenants bypass budget enforcement — usage billed via subscription
+  if (!tenant.has_subscription_token && tenant.current_month_spend >= tenant.monthly_budget_usd) {
     return NextResponse.json(
       { jsonrpc: "2.0", error: { code: -32001, message: "Monthly budget exceeded" }, id: body.id ?? null },
       { status: 200, headers: a2aHeaders(requestId) },
     );
   }
-  const remainingBudget = tenant.monthly_budget_usd - tenant.current_month_spend;
+  const remainingBudget = tenant.has_subscription_token
+    ? Infinity
+    : tenant.monthly_budget_usd - tenant.current_month_spend;
 
   // Resolve agent by slug — fail fast if not A2A-enabled
   const agentRows = await sql`
