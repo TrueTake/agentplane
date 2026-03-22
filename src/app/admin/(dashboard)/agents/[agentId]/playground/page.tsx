@@ -57,6 +57,8 @@ function renderEvent(event: PlaygroundEvent, idx: number) {
   if (event.type === "text_delta") return null;
   if (event.type === "session_created") return null;
   if (event.type === "session_info") return null;
+  if (event.type === "mcp_status") return null;
+  if (event.type === "rate_limit_event") return null;
 
   if (event.type === "user_message") {
     return (
