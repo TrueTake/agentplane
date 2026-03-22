@@ -1,6 +1,6 @@
 {
   "name": "@getcatalystiq/agent-plane",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "description": "TypeScript SDK for the AgentPlane API",
   "type": "module",
   "exports": {
