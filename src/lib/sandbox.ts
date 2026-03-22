@@ -785,9 +785,19 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
 
   const timeoutMs = config.maxIdleTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
 
+  const authHostnames = config.auth?.extraAllowedHostnames ?? [];
+  logger.info("Creating session sandbox network policy", {
+    session_id: config.sessionId,
+    auth_hostnames: authHostnames,
+    is_subscription: config.auth?.isSubscription ?? false,
+    base_url: config.auth?.anthropicBaseUrl ?? "none",
+  });
+
   const networkPolicy = {
     allow: [
       "ai-gateway.vercel.sh",
+      "api.claude.ai",
+      "api.anthropic.com",
       "*.composio.dev",
       "*.firecrawl.dev",
       "*.githubusercontent.com",
@@ -796,7 +806,7 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
       new URL(config.platformApiUrl).hostname,
       ...mcpHostnames,
       ...callbackHostnames,
-      ...(config.auth?.extraAllowedHostnames ?? []),
+      ...authHostnames,
     ],
   };
 
