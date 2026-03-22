@@ -686,7 +686,7 @@ function buildRunnerScript(config: SandboxConfig): string {
   const hasMcp = config.mcpServers && Object.keys(config.mcpServers).length > 0;
   const hasCallback = config.callbackData && config.callbackData.tools.length > 0;
   const agentConfig = {
-    model: config.agent.model,
+    model: config.agent.model.replace(/(\d+)\.(\d+)/g, "$1-$2"),
     permissionMode: config.agent.permission_mode,
     ...(hasMcp || hasCallback ? {} : { allowedTools: config.agent.allowed_tools }),
     maxTurns: config.agent.max_turns,
@@ -1039,7 +1039,7 @@ interface SessionRunnerConfig {
 
 function buildSessionRunnerScript(config: SessionRunnerConfig): string {
   const agentConfig = {
-    model: config.agent.model,
+    model: config.agent.model.replace(/(\d+)\.(\d+)/g, "$1-$2"),
     permissionMode: config.agent.permission_mode,
     ...(config.hasMcp ? {} : { allowedTools: config.agent.allowed_tools }),
     maxTurns: config.maxTurns,
