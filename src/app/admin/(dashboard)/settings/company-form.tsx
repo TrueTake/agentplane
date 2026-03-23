@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { FormField } from "@/components/ui/form-field";
+import { DatePicker } from "@/components/ui/date-picker";
 import { adminFetch } from "@/app/admin/lib/api";
 
 interface Company {
@@ -254,10 +255,10 @@ export function CompanyForm({ tenant }: { tenant: Company }) {
             />
           </FormField>
           <FormField label="Token Expires">
-            <Input
-              type="date"
+            <DatePicker
               value={subscriptionExpiresAt}
-              onChange={(e) => setSubscriptionExpiresAt(e.target.value)}
+              onChange={setSubscriptionExpiresAt}
+              placeholder="Select expiry date"
               disabled={!hasToken && !subscriptionToken}
             />
           </FormField>
