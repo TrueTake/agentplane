@@ -180,9 +180,23 @@ export function CompanyForm({ tenant }: { tenant: Company }) {
                 onChange={e => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () => setLogoUrl(reader.result as string);
-                  reader.readAsDataURL(file);
+                  const img = new Image();
+                  img.onload = () => {
+                    const MAX = 256;
+                    let w = img.width, h = img.height;
+                    if (w > MAX || h > MAX) {
+                      const ratio = Math.min(MAX / w, MAX / h);
+                      w = Math.round(w * ratio);
+                      h = Math.round(h * ratio);
+                    }
+                    const canvas = document.createElement("canvas");
+                    canvas.width = w;
+                    canvas.height = h;
+                    canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+                    setLogoUrl(canvas.toDataURL("image/png"));
+                    URL.revokeObjectURL(img.src);
+                  };
+                  img.src = URL.createObjectURL(file);
                   e.target.value = "";
                 }}
               />
