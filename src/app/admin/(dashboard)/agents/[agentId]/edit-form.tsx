@@ -173,46 +173,40 @@ export function AgentEditForm({ agent }: { agent: Agent }) {
               </div>
             )}
           </div>
-        </div>
-      </div>
-    </div>
-    <div className="rounded-lg border border-muted-foreground/25 p-5">
-      <SectionHeader title="Identity" />
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <FormField label="SOUL.md">
-              <Textarea
-                value={soulMd}
-                onChange={(e) => setSoulMd(e.target.value)}
-                placeholder={"## Voice & Tone\nDirect, concise, technical.\n\n## Values\nClarity over completeness.\n\n## Stance\nProactive problem-solver.\n\n## Boundaries\n- Never modify production data directly\n\n## Essence\nA focused engineering assistant."}
-                rows={10}
-                className="font-mono text-sm"
-                disabled={saving}
-              />
-              <span className="text-xs text-muted-foreground mt-1 block">
-                {soulMd.split(/\s+/).filter(Boolean).length} words
-              </span>
-            </FormField>
-          </div>
-          <div>
-            <FormField label="IDENTITY.md">
-              <Textarea
-                value={identityMd}
-                onChange={(e) => setIdentityMd(e.target.value)}
-                placeholder={"- **Communication Verbosity:** concise\n- **Communication Tone:** direct\n- **Decision Autonomy:** high\n- **Risk Tolerance:** moderate\n- **Collaboration Mode:** autonomous\n\n## Escalation Preferences\n- Budget over $50 -> escalate\n- Breaking changes -> escalate"}
-                rows={10}
-                className="font-mono text-sm"
-                disabled={saving}
-              />
-              <span className="text-xs text-muted-foreground mt-1 block">
-                {identityMd.split(/\s+/).filter(Boolean).length} words
-              </span>
-            </FormField>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <FormField label="SOUL.md">
+                <Textarea
+                  value={soulMd}
+                  onChange={(e) => setSoulMd(e.target.value)}
+                  placeholder={"## Voice & Tone\nDirect, concise, technical.\n\n## Values\nClarity over completeness.\n\n## Stance\nProactive problem-solver.\n\n## Boundaries\n- Never modify production data directly\n\n## Essence\nA focused engineering assistant."}
+                  rows={10}
+                  className="font-mono text-sm"
+                  disabled={saving}
+                />
+                <span className="text-xs text-muted-foreground mt-1 block">
+                  {soulMd.split(/\s+/).filter(Boolean).length} words
+                </span>
+              </FormField>
+            </div>
+            <div>
+              <FormField label="IDENTITY.md">
+                <Textarea
+                  value={identityMd}
+                  onChange={(e) => setIdentityMd(e.target.value)}
+                  placeholder={"- **Communication Verbosity:** concise\n- **Communication Tone:** direct\n- **Decision Autonomy:** high\n- **Risk Tolerance:** moderate\n- **Collaboration Mode:** autonomous\n\n## Escalation Preferences\n- Budget over $50 -> escalate\n- Breaking changes -> escalate"}
+                  rows={10}
+                  className="font-mono text-sm"
+                  disabled={saving}
+                />
+                <span className="text-xs text-muted-foreground mt-1 block">
+                  {identityMd.split(/\s+/).filter(Boolean).length} words
+                </span>
+              </FormField>
+            </div>
           </div>
         </div>
       </div>
-    </div>
     </div>
   );
 }
