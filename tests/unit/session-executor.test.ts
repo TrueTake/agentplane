@@ -27,6 +27,7 @@ vi.mock("@/lib/sessions", () => ({
   incrementMessageCount: vi.fn().mockResolvedValue(undefined),
   getSession: vi.fn(),
   updateSessionSandbox: vi.fn(),
+  updateSessionMcpRefreshedAt: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/session-files", () => ({
@@ -279,6 +280,7 @@ describe("prepareSessionSandbox", () => {
       status: "active" as const,
       message_count: 1,
       last_backup_at: null,
+      mcp_refreshed_at: null,
       idle_since: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -308,6 +310,7 @@ describe("prepareSessionSandbox", () => {
       status: "active" as const,
       message_count: 0,
       last_backup_at: null,
+      mcp_refreshed_at: null,
       idle_since: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -339,6 +342,7 @@ describe("prepareSessionSandbox", () => {
       status: "active" as const,
       message_count: 3,
       last_backup_at: "2026-01-01T00:00:00Z",
+      mcp_refreshed_at: null,
       idle_since: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -370,6 +374,7 @@ describe("prepareSessionSandbox", () => {
       status: "creating" as const,
       message_count: 0,
       last_backup_at: null,
+      mcp_refreshed_at: null,
       idle_since: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -396,6 +401,7 @@ describe("prepareSessionSandbox", () => {
       status: "creating" as const,
       message_count: 0,
       last_backup_at: null,
+      mcp_refreshed_at: null,
       idle_since: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

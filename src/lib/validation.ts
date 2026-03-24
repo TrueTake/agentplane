@@ -621,6 +621,7 @@ export const SessionRow = z.object({
   status: SessionStatusSchema,
   message_count: z.coerce.number(),
   last_backup_at: z.coerce.string().nullable(),
+  mcp_refreshed_at: z.coerce.string().nullable(),
   idle_since: z.coerce.string().nullable(),
   created_at: z.coerce.string(),
   updated_at: z.coerce.string(),
@@ -634,6 +635,7 @@ export const SessionResponseRow = SessionRow.omit({
   sandbox_id: true,
   session_blob_url: true,
   last_backup_at: true,
+  mcp_refreshed_at: true,
 });
 
 export type SessionResponse = z.infer<typeof SessionResponseRow>;

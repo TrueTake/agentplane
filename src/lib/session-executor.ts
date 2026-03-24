@@ -4,8 +4,8 @@ import {
   type SessionSandboxInstance,
   type SessionSandboxConfig,
 } from "@/lib/sandbox";
-import { buildMcpConfig } from "@/lib/mcp";
-import { fetchPluginContent } from "@/lib/plugins";
+import { buildMcpConfig, type McpBuildResult } from "@/lib/mcp";
+import { fetchPluginContent, type PluginFileSet } from "@/lib/plugins";
 import { resolveSandboxAuth } from "@/lib/tenant-auth";
 import { resolveEffectiveRunner } from "@/lib/models";
 import { createRun, transitionRunStatus } from "@/lib/runs";
@@ -13,6 +13,7 @@ import {
   transitionSessionStatus,
   incrementMessageCount,
   updateSessionSandbox,
+  updateSessionMcpRefreshedAt,
   type Session,
 } from "@/lib/sessions";
 import { uploadTranscript } from "@/lib/transcripts";
@@ -44,10 +45,31 @@ export interface SessionMessageResult {
 }
 
 const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+const MCP_REFRESH_TTL_MS = 30 * 60 * 1000; // skip MCP refresh if tokens are still fresh
+
+const EMPTY_MCP: McpBuildResult = { servers: {}, errors: [] };
+const EMPTY_PLUGINS: PluginFileSet = { skillFiles: [], agentFiles: [], warnings: [] };
+
+function isMcpFresh(session: Session): boolean {
+  if (!session.mcp_refreshed_at) return false;
+  return Date.now() - new Date(session.mcp_refreshed_at).getTime() < MCP_REFRESH_TTL_MS;
+}
+
+function recordMcpRefresh(sessionId: string, tenantId: TenantId): void {
+  updateSessionMcpRefreshedAt(sessionId, tenantId).catch((err) => {
+    logger.warn("Failed to update mcp_refreshed_at", {
+      session_id: sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
 
 /**
  * Prepare a session sandbox (create or reconnect).
  * Returns the sandbox instance ready for runMessage().
+ *
+ * When MCP tokens are fresh (< 30 min), skips MCP/plugin refresh
+ * for faster reconnect. Sandbox keeps its existing MCP config.
  */
 export async function prepareSessionSandbox(
   params: SessionExecutionParams,
@@ -56,9 +78,15 @@ export async function prepareSessionSandbox(
   const env = getEnv();
   const effectiveRunner = resolveEffectiveRunner(params.agent.model, params.agent.runner);
 
-  // Start MCP + plugin + auth resolution eagerly so results are ready for both hot and cold paths.
-  const mcpPromise = buildMcpConfig(params.agent, params.tenantId);
-  const pluginPromise = fetchPluginContent(params.agent.plugins ?? []);
+  // Skip MCP token refresh + plugin fetch when tokens are fresh (< 30 min).
+  // The hot path handles empty servers gracefully (skips updateMcpConfig).
+  const skipMcpRefresh = !!session.sandbox_id && isMcpFresh(session);
+  const mcpPromise = skipMcpRefresh
+    ? Promise.resolve(EMPTY_MCP)
+    : buildMcpConfig(params.agent, params.tenantId);
+  const pluginPromise = skipMcpRefresh
+    ? Promise.resolve(EMPTY_PLUGINS)
+    : fetchPluginContent(params.agent.plugins ?? []);
   const authPromise = resolveSandboxAuth(params.tenantId as TenantId, effectiveRunner);
 
   if (session.sandbox_id) {
@@ -98,9 +126,14 @@ export async function prepareSessionSandbox(
       if (idleSinceMs > 5 * 60 * 1000) {
         await reconnectResult.extendTimeout(DEFAULT_SESSION_TIMEOUT_MS);
       }
-      logger.info("Session sandbox reconnected (hot path)", {
+      if (!skipMcpRefresh) {
+        recordMcpRefresh(params.sessionId, params.tenantId);
+      }
+
+      logger.info("Session sandbox reconnected", {
         session_id: params.sessionId,
         sandbox_id: session.sandbox_id,
+        fast_path: skipMcpRefresh,
         skipped_extend_timeout: idleSinceMs <= 5 * 60 * 1000,
       });
       return reconnectResult;
@@ -138,6 +171,7 @@ export async function prepareSessionSandbox(
 
     const sandbox = await createSessionSandbox(sandboxConfig);
     await updateSessionSandbox(params.sessionId, params.tenantId, sandbox.id);
+    recordMcpRefresh(params.sessionId, params.tenantId);
 
     if (session.sdk_session_id && session.session_blob_url) {
       await restoreSessionFile(sandbox, session.session_blob_url, session.sdk_session_id);
@@ -175,6 +209,7 @@ export async function prepareSessionSandbox(
 
   const sandbox = await createSessionSandbox(sandboxConfig);
   await updateSessionSandbox(params.sessionId, params.tenantId, sandbox.id);
+  recordMcpRefresh(params.sessionId, params.tenantId);
 
   if (session.sdk_session_id && session.session_blob_url) {
     await restoreSessionFile(sandbox, session.session_blob_url, session.sdk_session_id);

@@ -102,6 +102,7 @@ export async function transitionSessionStatus(
     session_blob_url?: string | null;
     message_count?: number;
     last_backup_at?: string;
+    mcp_refreshed_at?: string;
     idle_since?: string | null;
     last_message_at?: string;
   },
@@ -121,7 +122,7 @@ export async function transitionSessionStatus(
 
   const ALLOWED_COLUMNS = new Set([
     "sandbox_id", "sdk_session_id", "session_blob_url",
-    "message_count", "last_backup_at", "idle_since", "last_message_at",
+    "message_count", "last_backup_at", "mcp_refreshed_at", "idle_since", "last_message_at",
   ]);
 
   if (updates) {
@@ -224,4 +225,15 @@ export async function updateSessionSandbox(
   if (result.rowCount === 0) {
     throw new NotFoundError("Session not found");
   }
+}
+
+// Update mcp_refreshed_at timestamp (used after MCP token refresh)
+export async function updateSessionMcpRefreshedAt(
+  sessionId: string,
+  tenantId: TenantId,
+): Promise<void> {
+  await execute(
+    "UPDATE sessions SET mcp_refreshed_at = now() WHERE id = $1 AND tenant_id = $2",
+    [sessionId, tenantId],
+  );
 }
