@@ -272,11 +272,11 @@ export function AgentIdentityTab({
 
       {/* Validation warnings */}
       {warnings.length > 0 && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
-          <p className="text-xs font-medium text-amber-300 mb-1">
+        <div className="rounded-md border border-yellow-600 bg-yellow-50 dark:bg-yellow-950/40 p-3">
+          <p className="text-xs font-medium text-yellow-800 dark:text-yellow-400 mb-1">
             Validation Warnings
           </p>
-          <ul className="text-xs text-amber-200 space-y-0.5">
+          <ul className="text-xs text-yellow-700 dark:text-yellow-300 space-y-0.5">
             {warnings.map((w) => (
               <li key={w}>- {w}</li>
             ))}
