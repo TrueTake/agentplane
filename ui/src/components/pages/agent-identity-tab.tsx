@@ -169,13 +169,14 @@ export function AgentIdentityTab({
     setError("");
     try {
       const data = await onExportSoul();
+      const slug = (data.name || "soulspec").toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const blob = new Blob([JSON.stringify(data, null, 2)], {
         type: "application/json",
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${data.name || "soulspec"}.json`;
+      a.download = `${slug}-soul.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {

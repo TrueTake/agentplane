@@ -129,14 +129,15 @@ export function IdentityTab({ agent }: { agent: Agent }) {
   async function handleExport() {
     setError("");
     try {
-      const data = await adminFetch<{ files: Record<string, string>; name: string }>(
+      const data = await adminFetch<{ manifest: { name?: string }; files: Record<string, string> }>(
         `/agents/${agent.id}/export-soul`,
       );
+      const slug = (data.manifest?.name || agent.name || "soulspec").toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${data.name || "soulspec"}.json`;
+      a.download = `${slug}-soul.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
