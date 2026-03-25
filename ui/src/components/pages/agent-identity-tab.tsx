@@ -81,8 +81,8 @@ export interface AgentIdentityTabProps {
   onGenerateSoul?: () => Promise<{ files: Record<string, string> }>;
   /** Import a SoulSpec from the ClawSouls registry. */
   onImportSoul?: (ref: string) => Promise<{ files: Record<string, string> }>;
-  /** Export the current SoulSpec as JSON. Returns file map + agent name. */
-  onExportSoul?: () => Promise<{ files: Record<string, string>; name: string }>;
+  /** Export the current SoulSpec as JSON. Returns manifest + file map + agent name. */
+  onExportSoul?: () => Promise<{ manifest?: Record<string, unknown>; files: Record<string, string>; name: string }>;
   /** Publish the SoulSpec to the ClawSouls registry. */
   onPublishSoul?: (owner: string) => Promise<void>;
 }
@@ -170,7 +170,9 @@ export function AgentIdentityTab({
     try {
       const data = await onExportSoul();
       const slug = (data.name || "soulspec").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
+      // Download { manifest, files } to match admin export format
+      const exportPayload = data.manifest ? { manifest: data.manifest, files: data.files } : { files: data.files };
+      const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
         type: "application/json",
       });
       const url = URL.createObjectURL(blob);

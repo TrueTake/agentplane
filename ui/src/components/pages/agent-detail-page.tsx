@@ -114,7 +114,7 @@ export function AgentDetailPage({ agentId, a2aBaseUrl, tenantSlug, adminApiBaseU
       },
       onExportSoul: async () => {
         const result = await adminFetch(`/api/agents/${agentId}/export-soul`);
-        return { files: result.files as Record<string, string>, name: agent?.name ?? "agent" };
+        return { manifest: result.manifest, files: result.files as Record<string, string>, name: result.manifest?.name ?? agent?.name ?? "agent" };
       },
       onPublishSoul: async (owner: string) => {
         await adminFetch(`/api/agents/${agentId}/publish-soul`, {
