@@ -29,7 +29,7 @@ function buildTree(files: FlatFile[]): { rootFiles: FlatFile[]; rootDirs: TreeNo
 
     const parts = dirPath.split("/");
     const node: TreeNode = {
-      name: parts[parts.length - 1],
+      name: parts[parts.length - 1] ?? dirPath,
       fullPath: dirPath,
       children: [],
       files: [],
@@ -114,7 +114,7 @@ export function FileTreeEditor({
 }: FileTreeEditorProps) {
   const [files, setFiles] = useState<FlatFile[]>(initialFiles);
   const [selectedPath, setSelectedPath] = useState<string | null>(
-    initialFiles.length > 0 ? initialFiles[0].path : null,
+    initialFiles.length > 0 ? initialFiles[0]!.path : null,
   );
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => {

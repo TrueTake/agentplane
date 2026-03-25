@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, lazy, Suspense } from "react";
 import { useSWRConfig } from "swr";
 import { useApi } from "../../hooks/use-api";
 import { useNavigation } from "../../hooks/use-navigation";
@@ -14,6 +14,10 @@ import { AgentSkillManager } from "./agent-skill-manager";
 import { AgentPluginManager } from "./agent-plugin-manager";
 import { AgentRuns } from "./agent-runs";
 import { AgentA2aInfo } from "./agent-a2a-info";
+
+import { FileTreeEditor } from "../editor/file-tree-editor";
+
+const AgentIdentityTab = lazy(() => import("./agent-identity-tab").then(m => ({ default: m.AgentIdentityTab })));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface AgentDetailData {
@@ -32,6 +36,13 @@ interface AgentDetailData {
   composio_allowed_tools: string[];
   soul_md: string | null;
   identity_md: string | null;
+  style_md: string | null;
+  agents_md: string | null;
+  heartbeat_md: string | null;
+  user_template_md: string | null;
+  examples_good_md: string | null;
+  examples_bad_md: string | null;
+  soul_spec_version: string | null;
   a2a_enabled: boolean;
   a2a_tags?: string[];
   [key: string]: unknown;
@@ -129,6 +140,14 @@ export function AgentDetailPage({ agentId, a2aBaseUrl, tenantSlug }: AgentDetail
                   />
                 )}
               </div>
+            ),
+          },
+          {
+            label: "Identity",
+            content: (
+              <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+                <AgentIdentityTab agent={agent} FileTreeEditor={FileTreeEditor} onSaved={invalidate} />
+              </Suspense>
             ),
           },
           {
