@@ -242,7 +242,7 @@ export function IdentityTab({ agent }: { agent: Agent }) {
       />
 
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Publish to ClawSouls Registry</DialogTitle>
           </DialogHeader>
