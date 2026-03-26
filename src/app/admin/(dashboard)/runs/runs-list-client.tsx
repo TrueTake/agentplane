@@ -8,6 +8,7 @@ import { RunStatusBadge } from "@/components/ui/run-status-badge";
 import { RunSourceBadge } from "@/components/ui/run-source-badge";
 import { LocalDate } from "@/components/local-date";
 import { toast } from "@/hooks/use-toast";
+import { adminStream } from "@/app/admin/lib/api";
 import type { RunTriggeredBy } from "@/lib/types";
 
 interface RunItem {
@@ -40,6 +41,7 @@ interface RunsListClientProps {
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "timed_out"]);
+const RERUNNABLE_STATUSES = new Set(["failed", "cancelled", "timed_out"]);
 const POLL_INTERVAL = 5000;
 
 export function RunsListClient({
@@ -53,6 +55,7 @@ export function RunsListClient({
 }: RunsListClientProps) {
   const router = useRouter();
   const [runs, setRuns] = useState(initialRuns);
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
   const prevStatusRef = useRef<Map<string, string>>(new Map());
 
   // Initialize status tracking
@@ -111,6 +114,55 @@ export function RunsListClient({
     return () => clearInterval(interval);
   }, [hasActiveRuns, poll]);
 
+  const handleRerun = async (run: RunItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setRerunningId(run.id);
+    try {
+      const res = await adminStream(`/agents/${run.agent_id}/runs`, {
+        method: "POST",
+        body: JSON.stringify({ prompt: run.prompt }),
+      });
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let newRunId: string | null = null;
+
+      while (!newRunId) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "sandbox_starting" && event.run_id) {
+              newRunId = event.run_id;
+            }
+          } catch { /* skip non-JSON */ }
+        }
+      }
+      reader.cancel();
+
+      if (newRunId) {
+        router.push(`/admin/runs/${newRunId}`);
+      } else {
+        throw new Error("Could not get new run ID from response");
+      }
+    } catch (err) {
+      toast({
+        title: "Rerun failed",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setRerunningId(null);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center mb-6">
@@ -127,6 +179,7 @@ export function RunsListClient({
           <Th align="right">Turns</Th>
           <Th align="right">Duration</Th>
           <Th>Created</Th>
+          <Th></Th>
         </AdminTableHead>
         <tbody>
           {runs.map((r) => (
@@ -152,9 +205,20 @@ export function RunsListClient({
               <td className="p-3 text-muted-foreground text-xs">
                 <LocalDate value={r.created_at} />
               </td>
+              <td className="p-3">
+                {RERUNNABLE_STATUSES.has(r.status) && (
+                  <button
+                    onClick={(e) => handleRerun(r, e)}
+                    disabled={rerunningId === r.id}
+                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {rerunningId === r.id ? "..." : "Rerun"}
+                  </button>
+                )}
+              </td>
             </AdminTableRow>
           ))}
-          {runs.length === 0 && <EmptyRow colSpan={9}>No runs found</EmptyRow>}
+          {runs.length === 0 && <EmptyRow colSpan={10}>No runs found</EmptyRow>}
         </tbody>
       </AdminTable>
     </div>

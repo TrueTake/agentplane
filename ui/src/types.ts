@@ -108,6 +108,7 @@ export interface AgentPlaneClient {
   runs: {
     list(params?: Record<string, unknown>): Promise<unknown>;
     get(runId: string): Promise<unknown>;
+    create(params: { agent_id: string; prompt: string }, options?: { signal?: AbortSignal }): Promise<AsyncIterable<StreamEventLike> & { run_id?: string | null }>;
     cancel(runId: string): Promise<unknown>;
     transcript(runId: string): Promise<unknown>;
     transcriptArray(runId: string): Promise<unknown[]>;

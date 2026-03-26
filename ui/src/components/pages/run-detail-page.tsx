@@ -6,6 +6,7 @@ import { useApi } from "../../hooks/use-api";
 import { useAgentPlaneClient } from "../../hooks/use-client";
 import { useRunStream } from "../../hooks/use-run-stream";
 import { useToast } from "../../hooks/use-toast";
+import { useNavigation } from "../../hooks/use-navigation";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
@@ -119,6 +120,12 @@ export function RunDetailPage({ runId, initialData, initialTranscript }: RunDeta
       {(run.status === "running" || run.status === "pending") && (
         <div className="flex items-center justify-end">
           <CancelRunButton runId={run.id} onCancelled={() => mutate(`run-${runId}`)} />
+        </div>
+      )}
+
+      {(run.status === "failed" || run.status === "cancelled" || run.status === "timed_out") && (
+        <div className="flex items-center justify-end">
+          <RerunButton agentId={run.agent_id} prompt={run.prompt} />
         </div>
       )}
 
@@ -239,6 +246,48 @@ export function RunDetailPage({ runId, initialData, initialTranscript }: RunDeta
         </details>
       </Card>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Rerun button (internal)                                            */
+/* ------------------------------------------------------------------ */
+
+function RerunButton({ agentId, prompt }: { agentId: string; prompt: string }) {
+  const [rerunning, setRerunning] = useState(false);
+  const client = useAgentPlaneClient();
+  const { onNavigate, basePath } = useNavigation();
+  const { toast } = useToast();
+
+  async function handleRerun() {
+    setRerunning(true);
+    try {
+      const stream = await client.runs.create({ agent_id: agentId, prompt });
+      let newRunId: string | null = null;
+      for await (const event of stream) {
+        if (event.type === "run_started") {
+          newRunId = (event as Record<string, unknown>).run_id as string;
+          break;
+        }
+      }
+      if (newRunId) {
+        onNavigate(`${basePath}/runs/${newRunId}`);
+      }
+    } catch (err) {
+      toast({
+        title: "Failed to rerun",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setRerunning(false);
+    }
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={handleRerun} disabled={rerunning}>
+      {rerunning ? "Rerunning\u2026" : "\u21BB Rerun"}
+    </Button>
   );
 }
 

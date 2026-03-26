@@ -8,6 +8,7 @@ import { MetricCard } from "@/components/ui/metric-card";
 import { LocalDate } from "@/components/local-date";
 import { TranscriptViewer } from "./transcript-viewer";
 import { CancelRunButton } from "./cancel-run-button";
+import { adminStream } from "@/app/admin/lib/api";
 import { toast } from "@/hooks/use-toast";
 
 interface RunData {
@@ -47,6 +48,7 @@ interface LiveRunDetailProps {
 }
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "timed_out"]);
+const RERUNNABLE_STATUSES = new Set(["failed", "cancelled", "timed_out"]);
 
 export function LiveRunDetail({ run: initialRun, transcript: initialTranscript, agentModel, requestedByKeyName }: LiveRunDetailProps) {
   const router = useRouter();
@@ -54,6 +56,7 @@ export function LiveRunDetail({ run: initialRun, transcript: initialTranscript, 
   const [events, setEvents] = useState<TranscriptEvent[]>(initialTranscript);
   const [isStreaming, setIsStreaming] = useState(!TERMINAL_STATUSES.has(initialRun.status));
   const [textDelta, setTextDelta] = useState("");
+  const [isRerunning, setIsRerunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const eventCountRef = useRef(initialTranscript.length);
 
@@ -176,12 +179,69 @@ export function LiveRunDetail({ run: initialRun, transcript: initialTranscript, 
   }, [initialRun, initialTranscript]);
 
   const isActive = run.status === "running" || run.status === "pending";
+  const isRerunnable = RERUNNABLE_STATUSES.has(run.status);
+
+  const handleRerun = async () => {
+    setIsRerunning(true);
+    try {
+      const res = await adminStream(`/agents/${run.agent_id}/runs`, {
+        method: "POST",
+        body: JSON.stringify({ prompt: run.prompt }),
+      });
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let newRunId: string | null = null;
+
+      while (!newRunId) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "sandbox_starting" && event.run_id) {
+              newRunId = event.run_id;
+            }
+          } catch { /* skip non-JSON */ }
+        }
+      }
+      reader.cancel();
+
+      if (newRunId) {
+        router.push(`/admin/runs/${newRunId}`);
+      } else {
+        throw new Error("Could not get new run ID from response");
+      }
+    } catch (err) {
+      toast({
+        title: "Rerun failed",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setIsRerunning(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
-      {isActive && (
-        <div className="flex items-center justify-end">
-          <CancelRunButton runId={run.id} />
+      {(isActive || isRerunnable) && (
+        <div className="flex items-center justify-end gap-2">
+          {isActive && <CancelRunButton runId={run.id} />}
+          {isRerunnable && (
+            <button
+              onClick={handleRerun}
+              disabled={isRerunning}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isRerunning ? "Rerunning..." : "\u21BB Rerun"}
+            </button>
+          )}
         </div>
       )}
 

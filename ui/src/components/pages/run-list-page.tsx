@@ -2,8 +2,10 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useApi } from "../../hooks/use-api";
+import { useAgentPlaneClient } from "../../hooks/use-client";
 import { useToast } from "../../hooks/use-toast";
 import { useNavigation } from "../../hooks/use-navigation";
+import { Button } from "../ui/button";
 import { PaginationBar } from "../ui/pagination-bar";
 import { RunStatusBadge } from "../ui/run-status-badge";
 import { RunSourceBadge } from "../ui/run-source-badge";
@@ -170,6 +172,7 @@ export function RunListPage({ initialData }: RunListPageProps) {
           <Th align="right">Turns</Th>
           <Th align="right">Duration</Th>
           <Th>Created</Th>
+          <Th></Th>
         </AdminTableHead>
         <tbody>
           {runs.map((r) => (
@@ -195,11 +198,60 @@ export function RunListPage({ initialData }: RunListPageProps) {
               <td className="p-3 text-muted-foreground text-xs">
                 <LocalDate value={r.created_at} />
               </td>
+              <td className="p-3">
+                {(r.status === "failed" || r.status === "cancelled" || r.status === "timed_out") && (
+                  <RerunRowButton agentId={r.agent_id} prompt={r.prompt} />
+                )}
+              </td>
             </AdminTableRow>
           ))}
-          {runs.length === 0 && <EmptyRow colSpan={9}>No runs found</EmptyRow>}
+          {runs.length === 0 && <EmptyRow colSpan={10}>No runs found</EmptyRow>}
         </tbody>
       </AdminTable>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Rerun row button (internal)                                        */
+/* ------------------------------------------------------------------ */
+
+function RerunRowButton({ agentId, prompt }: { agentId: string; prompt: string }) {
+  const [rerunning, setRerunning] = useState(false);
+  const client = useAgentPlaneClient();
+  const { onNavigate, basePath } = useNavigation();
+  const { toast } = useToast();
+
+  async function handleRerun(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setRerunning(true);
+    try {
+      const stream = await client.runs.create({ agent_id: agentId, prompt });
+      let newRunId: string | null = null;
+      for await (const event of stream) {
+        if (event.type === "run_started") {
+          newRunId = (event as Record<string, unknown>).run_id as string;
+          break;
+        }
+      }
+      if (newRunId) {
+        onNavigate(`${basePath}/runs/${newRunId}`);
+      }
+    } catch (err) {
+      toast({
+        title: "Failed to rerun",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setRerunning(false);
+    }
+  }
+
+  return (
+    <Button variant="ghost" size="sm" onClick={handleRerun} disabled={rerunning}>
+      {rerunning ? "\u2026" : "Rerun"}
+    </Button>
   );
 }
