@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
 import { Badge } from "../ui/badge";
+import { cn } from "../../utils";
 
 interface TranscriptEvent {
   type: string;
@@ -19,7 +20,7 @@ interface ContentBlock {
 }
 
 interface ConversationItem {
-  role: "system" | "assistant" | "tool" | "result" | "error" | "a2a_incoming";
+  role: "system" | "assistant" | "tool" | "result" | "error" | "a2a_incoming" | "user";
   text?: string | undefined;
   toolName?: string | undefined;
   toolInput?: unknown;
@@ -143,13 +144,22 @@ function buildConversation(events: TranscriptEvent[]): ConversationItem[] {
         role: "error",
         error: String(event.error || "Unknown error"),
       });
+    } else if (event.type === "user_message") {
+      items.push({ role: "user", text: String(event.text || "") });
+    } else if (event.type === "stream_detached") {
+      const ts = event.timestamp ? new Date(String(event.timestamp)).toLocaleTimeString() : "";
+      items.push({ role: "system", text: ts ? `Stream detached at ${ts} — run continues in background` : "Stream detached — run continues in background" });
+    } else if (event.type === "queued") {
+      items.push({ role: "system", text: "Queued…" });
+    } else if (event.type === "sandbox_starting") {
+      items.push({ role: "system", text: "Starting sandbox…" });
     }
   }
 
   return items;
 }
 
-export function TranscriptViewer({ transcript, prompt, isStreaming = false }: { transcript: TranscriptEvent[]; prompt?: string; isStreaming?: boolean }) {
+export function TranscriptViewer({ transcript, prompt, isStreaming = false, className }: { transcript: TranscriptEvent[]; prompt?: string; isStreaming?: boolean; className?: string }) {
   const conversation = useMemo(() => buildConversation(transcript), [transcript]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -176,15 +186,15 @@ export function TranscriptViewer({ transcript, prompt, isStreaming = false }: { 
   }, [transcript.length, isStreaming]);
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={cn("flex flex-col", className)}>
+      <CardHeader className="shrink-0">
         <CardTitle className="text-base">Transcript</CardTitle>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="p-0 flex-1 min-h-0">
         <div
           ref={scrollContainerRef}
           onScroll={isStreaming ? handleScroll : undefined}
-          className="space-y-3 overflow-y-auto px-6 pb-6"
+          className="space-y-3 overflow-y-auto h-full px-6 pb-6"
         >
           {prompt && (
             <div className="rounded-md border border-border bg-muted/20 px-4 py-3">
@@ -217,6 +227,8 @@ function ConversationView({ items }: { items: ConversationItem[] }) {
         switch (item.role) {
           case "a2a_incoming":
             return <A2AIncomingItem key={i} item={item} />;
+          case "user":
+            return <UserMessageItem key={i} item={item} />;
           case "system":
             return <SystemItem key={i} item={item} />;
           case "assistant":
@@ -262,8 +274,28 @@ function A2AIncomingItem({ item }: { item: ConversationItem }) {
   );
 }
 
+function UserMessageItem({ item }: { item: ConversationItem }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/20 px-4 py-3">
+      <div className="text-xs font-medium text-muted-foreground mb-1">You</div>
+      <pre className="text-xs font-mono whitespace-pre-wrap">{item.text}</pre>
+    </div>
+  );
+}
+
 function SystemItem({ item }: { item: ConversationItem }) {
   const [expanded, setExpanded] = useState(false);
+
+  // Simple text-only system message (e.g. "Queued…", "Starting sandbox…")
+  if (!item.model && !item.tools?.length) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
+        <Badge variant="outline" className="text-[10px]">system</Badge>
+        {item.text}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-md border border-border bg-muted/30 overflow-hidden">
       <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-muted/50 transition-colors">
