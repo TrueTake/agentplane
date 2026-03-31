@@ -20,8 +20,13 @@ import {
 import { getHttpClient } from "@/db";
 import { createRun, getRun, transitionRunStatus } from "@/lib/runs";
 import { prepareRunExecution, finalizeRun } from "@/lib/run-executor";
+import { prepareSessionSandbox, finalizeSessionMessage } from "@/lib/session-executor";
+import { findSessionByContextId, createSession, transitionSessionStatus } from "@/lib/sessions";
+import { captureTranscript } from "@/lib/transcript-utils";
+import { generateRunToken } from "@/lib/crypto";
+import { getEnv } from "@/lib/env";
 import type { CallbackData } from "@/lib/mcp";
-import { reconnectSandbox } from "@/lib/sandbox";
+import { reconnectSandbox, type SessionSandboxInstance } from "@/lib/sandbox";
 import { IDENTITY_METADATA_KEY, IDENTITY_METADATA_KEY_V2 } from "@/lib/identity";
 import { logger } from "@/lib/logger";
 import type { RunStatus, TenantId, AgentId, RunId } from "@/lib/types";
@@ -310,7 +315,7 @@ export function runToA2aTask(run: z.infer<typeof RunForTaskRow>): Task {
   return {
     id: run.id,
     kind: "task",
-    contextId: run.id, // Phase 1: contextId = taskId (no multi-turn)
+    contextId: run.id, // Default: contextId = taskId. For session-backed runs, callers override via effectiveContextId in events.
     status: {
       state,
       timestamp: run.completed_at || run.created_at,
@@ -415,6 +420,63 @@ export class RunBackedTaskStore implements TaskStore {
   }
 }
 
+// --- Shared A2A Log Consumption (Unit 2) ---
+
+/**
+ * Consume an async log stream, publish A2A events (artifact + status updates),
+ * and return the last assistant text for result extraction.
+ * Works with both `prepareRunExecution().logIterator` and `captureTranscript(runMessage().logs())`.
+ */
+async function consumeA2aLogStream(
+  logIterator: AsyncIterable<string>,
+  eventBus: ExecutionEventBus,
+  taskId: string,
+  contextId: string | undefined,
+): Promise<string> {
+  let lastAssistantText = "";
+  try {
+    for await (const line of logIterator) {
+      try {
+        const event = JSON.parse(line);
+        // Accumulate assistant message text (the actual agent output)
+        if (event.type === "assistant" && event.message?.content) {
+          const textBlocks = Array.isArray(event.message.content)
+            ? event.message.content.filter((b: { type?: string }) => b.type === "text")
+            : [];
+          if (textBlocks.length > 0) {
+            lastAssistantText = textBlocks.map((b: { text: string }) => b.text).join("\n");
+          }
+        }
+        if (event.type === "result") {
+          // Publish artifact with the accumulated agent output
+          const resultText = lastAssistantText || event.result || event.text || "";
+          if (resultText) {
+            eventBus.publish({
+              kind: "artifact-update",
+              taskId,
+              contextId,
+              artifact: {
+                artifactId: "result",
+                name: "Agent Result",
+                parts: [{ kind: "text", text: resultText } as TextPart],
+              },
+              lastChunk: true,
+            } as TaskArtifactUpdateEvent);
+          }
+        }
+      } catch {
+        // Non-JSON line — skip
+      }
+    }
+  } catch (err) {
+    logger.error("Error consuming log stream", {
+      task_id: taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return lastAssistantText;
+}
+
 // --- SandboxAgentExecutor ---
 
 interface ExecutorDeps {
@@ -431,6 +493,8 @@ export class SandboxAgentExecutor implements AgentExecutor {
 
   async execute(requestContext: RequestContext, eventBus: ExecutionEventBus): Promise<void> {
     const taskId = requestContext.taskId;
+    // Preserve client-supplied contextId in all A2A events (Unit 4)
+    const effectiveContextId = requestContext.contextId || taskId;
 
     try {
       // Validate taskId
@@ -442,7 +506,7 @@ export class SandboxAgentExecutor implements AgentExecutor {
       eventBus.publish({
         kind: "task",
         id: taskId,
-        contextId: requestContext.contextId,
+        contextId: effectiveContextId,
         status: { state: "working", timestamp: new Date().toISOString() },
       } as unknown as Task);
 
@@ -450,7 +514,7 @@ export class SandboxAgentExecutor implements AgentExecutor {
       eventBus.publish({
         kind: "status-update",
         taskId,
-        contextId: requestContext.contextId,
+        contextId: effectiveContextId,
         status: { state: "working", timestamp: new Date().toISOString() },
         final: false,
       } as TaskStatusUpdateEvent);
@@ -483,6 +547,7 @@ export class SandboxAgentExecutor implements AgentExecutor {
         has_callback: !!cb,
         callback_url: callbackUrl,
         tool_count: cb?.available_tools ? (cb.available_tools as unknown[]).length : 0,
+        context_id: requestContext.contextId,
       });
 
       // Build prompt from text parts (callback data is handled via MCP bridge, not prompt text)
@@ -508,119 +573,46 @@ export class SandboxAgentExecutor implements AgentExecutor {
         ...(requestedBudget !== undefined ? [requestedBudget] : []),
       );
 
-      // Create run
-      const { run } = await createRun(
-        this.deps.tenantId,
-        agent.id as AgentId,
-        prompt,
-        {
-          triggeredBy: "a2a",
-          createdByKeyId: this.deps.createdByKeyId,
-        },
-      );
+      // Build callback data for MCP bridge
+      const parsedCallbackData: CallbackData | undefined = cb ? {
+        url: callbackUrl!,
+        token: cb.callback_token as string,
+        tools: cb.available_tools as CallbackData["tools"],
+      } : undefined;
 
-      // Log incoming A2A message as the first transcript event
-      const promptPreview = prompt.split("\n").slice(0, 5).join("\n").slice(0, 500);
-      const a2aIncomingEvent = JSON.stringify({
-        type: "a2a_incoming",
-        run_id: run.id,
-        context_id: requestContext.contextId,
-        task_id: taskId,
-        agent_name: agent.name,
-        sender: this.deps.createdByKeyId ?? "unknown",
-        prompt_preview: promptPreview,
-        has_callback: !!cb,
-        callback_url: callbackUrl,
-        timestamp: new Date().toISOString(),
-      });
+      // --- Session reuse logic (Unit 3) ---
+      const clientContextId = requestContext.contextId;
 
-      // Prepare and start sandbox execution
-      const { sandbox, logIterator, transcriptChunks } = await prepareRunExecution({
-        agent,
-        tenantId: this.deps.tenantId,
-        runId: run.id as RunId,
-        prompt,
-        platformApiUrl: this.deps.platformApiUrl,
-        effectiveBudget,
-        effectiveMaxTurns: agent.max_turns,
-        maxRuntimeSeconds: agent.max_runtime_seconds,
-        extraAllowedHostnames: callbackHostname ? [callbackHostname] : [],
-        callbackData: cb ? {
-          url: callbackUrl!,
-          token: cb.callback_token as string,
-          tools: cb.available_tools as CallbackData["tools"],
-        } : undefined,
-      });
+      if (clientContextId) {
+        // Check for existing session
+        const existingSession = await findSessionByContextId(
+          this.deps.tenantId,
+          agent.id as AgentId,
+          clientContextId,
+        );
 
-      // Inject the A2A incoming event as the first transcript entry
-      transcriptChunks.unshift(a2aIncomingEvent);
-
-      // Consume log stream, publish A2A events
-      let lastAssistantText = "";
-      try {
-        for await (const line of logIterator) {
-          try {
-            const event = JSON.parse(line);
-            // Accumulate assistant message text (the actual agent output)
-            if (event.type === "assistant" && event.message?.content) {
-              const textBlocks = Array.isArray(event.message.content)
-                ? event.message.content.filter((b: { type?: string }) => b.type === "text")
-                : [];
-              if (textBlocks.length > 0) {
-                lastAssistantText = textBlocks.map((b: { text: string }) => b.text).join("\n");
-              }
-            }
-            if (event.type === "result") {
-              // Publish artifact with the accumulated agent output
-              const resultText = lastAssistantText || event.result || event.text || "";
-              if (resultText) {
-                eventBus.publish({
-                  kind: "artifact-update",
-                  taskId,
-                  contextId: requestContext.contextId,
-                  artifact: {
-                    artifactId: "result",
-                    name: "Agent Result",
-                    parts: [{ kind: "text", text: resultText } as TextPart],
-                  },
-                  lastChunk: true,
-                } as TaskArtifactUpdateEvent);
-              }
-            }
-          } catch {
-            // Non-JSON line — skip
-          }
+        if (existingSession) {
+          // --- REUSE PATH: session found ---
+          await this.executeSessionReuse(
+            existingSession, requestContext, eventBus, taskId, effectiveContextId,
+            prompt, effectiveBudget, callbackHostname, parsedCallbackData,
+          );
+          return;
         }
-      } catch (err) {
-        logger.error("Error consuming log stream", {
-          task_id: taskId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+
+        // --- FIRST MESSAGE PATH: create session with contextId ---
+        await this.executeFirstSessionMessage(
+          clientContextId, requestContext, eventBus, taskId, effectiveContextId,
+          prompt, effectiveBudget, callbackHostname, parsedCallbackData,
+        );
+        return;
       }
 
-      // Finalize run: persist transcript, update billing, stop sandbox
-      await finalizeRun(run.id as RunId, this.deps.tenantId, transcriptChunks, sandbox, effectiveBudget);
-
-      // Read finalized status and publish final A2A event
-      const sql = getHttpClient();
-      const finalRows = await sql`
-        SELECT status FROM runs WHERE id = ${run.id} AND tenant_id = ${this.deps.tenantId}
-      `;
-      const finalStatus = finalRows[0]?.status as RunStatus | undefined;
-      const finalState = finalStatus ? runStatusToA2a(finalStatus) : "completed";
-
-      // Publish final status
-      eventBus.publish({
-        kind: "status-update",
-        taskId,
-        contextId: requestContext.contextId,
-        status: {
-          state: finalState,
-          timestamp: new Date().toISOString(),
-          ...(finalState === "failed" ? { message: { role: "agent", kind: "message", messageId: taskId, parts: [{ kind: "text", text: "Agent execution failed" } as TextPart] } } : {}),
-        },
-        final: true,
-      } as TaskStatusUpdateEvent);
+      // --- ONE-SHOT PATH: no contextId (unchanged) ---
+      await this.executeOneShot(
+        requestContext, eventBus, taskId, effectiveContextId,
+        prompt, effectiveBudget, callbackHostname, parsedCallbackData,
+      );
 
     } catch (err) {
       // Sanitize errors — never leak internals
@@ -635,7 +627,7 @@ export class SandboxAgentExecutor implements AgentExecutor {
       eventBus.publish({
         kind: "status-update",
         taskId,
-        contextId: requestContext.contextId,
+        contextId: effectiveContextId,
         status: {
           state: "failed",
           timestamp: new Date().toISOString(),
@@ -651,6 +643,395 @@ export class SandboxAgentExecutor implements AgentExecutor {
     } finally {
       eventBus.finished();
     }
+  }
+
+  /**
+   * Reuse path: existing session found for contextId.
+   * Reconnect sandbox, create run, runMessage, finalizeSessionMessage.
+   */
+  private async executeSessionReuse(
+    existingSession: Awaited<ReturnType<typeof findSessionByContextId>> & {},
+    requestContext: RequestContext,
+    eventBus: ExecutionEventBus,
+    taskId: string,
+    effectiveContextId: string,
+    prompt: string,
+    effectiveBudget: number,
+    callbackHostname: string | undefined,
+    callbackData: CallbackData | undefined,
+  ): Promise<void> {
+    const agent = this.deps.agent;
+    const tenantId = this.deps.tenantId;
+
+    logger.info("A2A session reuse: transitioning to active", {
+      session_id: existingSession.id,
+      context_id: existingSession.context_id,
+    });
+
+    // Atomically lock session: idle → active
+    const transitioned = await transitionSessionStatus(
+      existingSession.id,
+      tenantId,
+      "idle",
+      "active",
+    );
+
+    if (!transitioned) {
+      // Session is busy (active/creating) or stopped
+      throw new A2AError(
+        -32000,
+        "Session is busy — another message is being processed for this contextId",
+      );
+    }
+
+    // Try to reconnect to existing sandbox
+    let sandbox: SessionSandboxInstance | null = null;
+    try {
+      sandbox = await prepareSessionSandbox(
+        {
+          sessionId: existingSession.id,
+          tenantId,
+          agent,
+          prompt,
+          platformApiUrl: this.deps.platformApiUrl,
+          effectiveBudget,
+          effectiveMaxTurns: agent.max_turns,
+        },
+        existingSession,
+      );
+    } catch (err) {
+      logger.warn("A2A session reuse: sandbox reconnect failed, falling back to one-shot", {
+        session_id: existingSession.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Rollback session to idle so it can be retried or cleaned up
+      await transitionSessionStatus(
+        existingSession.id,
+        tenantId,
+        "active",
+        "idle",
+        { idle_since: new Date().toISOString() },
+      ).catch((rollbackErr) => {
+        logger.error("Failed to rollback session to idle after reconnect failure", {
+          session_id: existingSession.id,
+          error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+        });
+      });
+
+      // Fall through to one-shot path
+      await this.executeOneShot(
+        requestContext, eventBus, taskId, effectiveContextId,
+        prompt, effectiveBudget, callbackHostname, callbackData,
+      );
+      return;
+    }
+
+    // Create run linked to session
+    const { run } = await createRun(
+      tenantId,
+      agent.id as AgentId,
+      prompt,
+      {
+        triggeredBy: "a2a",
+        createdByKeyId: this.deps.createdByKeyId,
+        sessionId: existingSession.id,
+      },
+    );
+
+    const env = getEnv();
+    const runToken = await generateRunToken(run.id as RunId, env.ENCRYPTION_KEY);
+
+    // Transition run to running
+    await transitionRunStatus(run.id as RunId, tenantId, "pending", "running", {
+      sandbox_id: sandbox.id,
+      started_at: new Date().toISOString(),
+    });
+
+    // Send message to existing sandbox
+    const result = await sandbox.runMessage({
+      prompt,
+      sdkSessionId: existingSession.sdk_session_id,
+      runId: run.id as RunId,
+      runToken,
+      maxTurns: agent.max_turns,
+      maxBudgetUsd: effectiveBudget,
+    });
+
+    // Capture transcript with session_info tracking
+    const transcriptChunks: string[] = [];
+    const sdkSessionIdRef = { value: existingSession.sdk_session_id };
+    const logIterator = captureTranscript(
+      result.logs(),
+      transcriptChunks,
+      tenantId,
+      run.id as RunId,
+      (event) => {
+        if (event.type === "session_info" && event.sdk_session_id) {
+          sdkSessionIdRef.value = event.sdk_session_id as string;
+        }
+      },
+    );
+
+    // Inject A2A incoming event
+    const promptPreview = prompt.split("\n").slice(0, 5).join("\n").slice(0, 500);
+    transcriptChunks.unshift(JSON.stringify({
+      type: "a2a_incoming",
+      run_id: run.id,
+      context_id: effectiveContextId,
+      task_id: taskId,
+      agent_name: agent.name,
+      sender: this.deps.createdByKeyId ?? "unknown",
+      prompt_preview: promptPreview,
+      session_reuse: true,
+      timestamp: new Date().toISOString(),
+    }));
+
+    // Consume logs and publish A2A events
+    await consumeA2aLogStream(logIterator, eventBus, taskId, effectiveContextId);
+
+    // Finalize: persist transcript, backup session file, transition session to idle
+    await finalizeSessionMessage(
+      run.id as RunId,
+      tenantId,
+      existingSession.id,
+      transcriptChunks,
+      effectiveBudget,
+      sandbox,
+      sdkSessionIdRef.value,
+    );
+
+    // Read finalized status and publish final A2A event
+    await this.publishFinalStatus(run.id, taskId, effectiveContextId, eventBus);
+  }
+
+  /**
+   * First message path: contextId present but no existing session.
+   * Create session sandbox, create session + run, finalize with session bookkeeping.
+   */
+  private async executeFirstSessionMessage(
+    clientContextId: string,
+    requestContext: RequestContext,
+    eventBus: ExecutionEventBus,
+    taskId: string,
+    effectiveContextId: string,
+    prompt: string,
+    effectiveBudget: number,
+    callbackHostname: string | undefined,
+    callbackData: CallbackData | undefined,
+  ): Promise<void> {
+    const agent = this.deps.agent;
+    const tenantId = this.deps.tenantId;
+
+    logger.info("A2A first session message: creating session", {
+      agent_id: agent.id,
+      context_id: clientContextId,
+    });
+
+    // Create session with contextId
+    const { session } = await createSession(
+      tenantId,
+      agent.id as AgentId,
+      { contextId: clientContextId },
+    );
+
+    // Transition session: creating → active
+    await transitionSessionStatus(session.id, tenantId, "creating", "active");
+
+    // Create run linked to session
+    const { run } = await createRun(
+      tenantId,
+      agent.id as AgentId,
+      prompt,
+      {
+        triggeredBy: "a2a",
+        createdByKeyId: this.deps.createdByKeyId,
+        sessionId: session.id,
+      },
+    );
+
+    // Use prepareSessionSandbox to create sandbox (cold path — no existing sandbox)
+    let sandbox: SessionSandboxInstance;
+    try {
+      sandbox = await prepareSessionSandbox(
+        {
+          sessionId: session.id,
+          tenantId,
+          agent,
+          prompt,
+          platformApiUrl: this.deps.platformApiUrl,
+          effectiveBudget,
+          effectiveMaxTurns: agent.max_turns,
+        },
+        session,
+      );
+    } catch (err) {
+      // Sandbox creation failed — transition session to stopped and re-throw
+      await transitionSessionStatus(session.id, tenantId, "active", "stopped").catch(() => {});
+      throw err;
+    }
+
+    const env = getEnv();
+    const runToken = await generateRunToken(run.id as RunId, env.ENCRYPTION_KEY);
+
+    // Transition run to running
+    await transitionRunStatus(run.id as RunId, tenantId, "pending", "running", {
+      sandbox_id: sandbox.id,
+      started_at: new Date().toISOString(),
+    });
+
+    // Send first message to sandbox
+    const result = await sandbox.runMessage({
+      prompt,
+      sdkSessionId: null, // First message — no existing SDK session
+      runId: run.id as RunId,
+      runToken,
+      maxTurns: agent.max_turns,
+      maxBudgetUsd: effectiveBudget,
+    });
+
+    // Capture transcript with session_info tracking
+    const transcriptChunks: string[] = [];
+    const sdkSessionIdRef = { value: null as string | null };
+    const logIterator = captureTranscript(
+      result.logs(),
+      transcriptChunks,
+      tenantId,
+      run.id as RunId,
+      (event) => {
+        if (event.type === "session_info" && event.sdk_session_id) {
+          sdkSessionIdRef.value = event.sdk_session_id as string;
+        }
+      },
+    );
+
+    // Inject A2A incoming event
+    const promptPreview = prompt.split("\n").slice(0, 5).join("\n").slice(0, 500);
+    transcriptChunks.unshift(JSON.stringify({
+      type: "a2a_incoming",
+      run_id: run.id,
+      context_id: effectiveContextId,
+      task_id: taskId,
+      agent_name: agent.name,
+      sender: this.deps.createdByKeyId ?? "unknown",
+      prompt_preview: promptPreview,
+      session_first: true,
+      timestamp: new Date().toISOString(),
+    }));
+
+    // Consume logs and publish A2A events
+    await consumeA2aLogStream(logIterator, eventBus, taskId, effectiveContextId);
+
+    // Finalize: persist transcript, backup session file, transition session to idle
+    await finalizeSessionMessage(
+      run.id as RunId,
+      tenantId,
+      session.id,
+      transcriptChunks,
+      effectiveBudget,
+      sandbox,
+      sdkSessionIdRef.value,
+    );
+
+    // Read finalized status and publish final A2A event
+    await this.publishFinalStatus(run.id, taskId, effectiveContextId, eventBus);
+  }
+
+  /**
+   * One-shot path: no contextId — existing behavior unchanged.
+   */
+  private async executeOneShot(
+    requestContext: RequestContext,
+    eventBus: ExecutionEventBus,
+    taskId: string,
+    effectiveContextId: string,
+    prompt: string,
+    effectiveBudget: number,
+    callbackHostname: string | undefined,
+    callbackData: CallbackData | undefined,
+  ): Promise<void> {
+    const agent = this.deps.agent;
+    const tenantId = this.deps.tenantId;
+
+    // Create run
+    const { run } = await createRun(
+      tenantId,
+      agent.id as AgentId,
+      prompt,
+      {
+        triggeredBy: "a2a",
+        createdByKeyId: this.deps.createdByKeyId,
+      },
+    );
+
+    // Log incoming A2A message as the first transcript event
+    const promptPreview = prompt.split("\n").slice(0, 5).join("\n").slice(0, 500);
+    const a2aIncomingEvent = JSON.stringify({
+      type: "a2a_incoming",
+      run_id: run.id,
+      context_id: effectiveContextId,
+      task_id: taskId,
+      agent_name: agent.name,
+      sender: this.deps.createdByKeyId ?? "unknown",
+      prompt_preview: promptPreview,
+      has_callback: !!callbackData,
+      callback_url: callbackData?.url,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Prepare and start sandbox execution
+    const { sandbox, logIterator, transcriptChunks } = await prepareRunExecution({
+      agent,
+      tenantId,
+      runId: run.id as RunId,
+      prompt,
+      platformApiUrl: this.deps.platformApiUrl,
+      effectiveBudget,
+      effectiveMaxTurns: agent.max_turns,
+      maxRuntimeSeconds: agent.max_runtime_seconds,
+      extraAllowedHostnames: callbackHostname ? [callbackHostname] : [],
+      callbackData,
+    });
+
+    // Inject the A2A incoming event as the first transcript entry
+    transcriptChunks.unshift(a2aIncomingEvent);
+
+    // Consume log stream, publish A2A events (using shared function)
+    await consumeA2aLogStream(logIterator, eventBus, taskId, effectiveContextId);
+
+    // Finalize run: persist transcript, update billing, stop sandbox
+    await finalizeRun(run.id as RunId, tenantId, transcriptChunks, sandbox, effectiveBudget);
+
+    // Read finalized status and publish final A2A event
+    await this.publishFinalStatus(run.id, taskId, effectiveContextId, eventBus);
+  }
+
+  /**
+   * Read finalized run status and publish final A2A status event.
+   */
+  private async publishFinalStatus(
+    runId: string,
+    taskId: string,
+    effectiveContextId: string,
+    eventBus: ExecutionEventBus,
+  ): Promise<void> {
+    const sql = getHttpClient();
+    const finalRows = await sql`
+      SELECT status FROM runs WHERE id = ${runId} AND tenant_id = ${this.deps.tenantId}
+    `;
+    const finalStatus = finalRows[0]?.status as RunStatus | undefined;
+    const finalState = finalStatus ? runStatusToA2a(finalStatus) : "completed";
+
+    eventBus.publish({
+      kind: "status-update",
+      taskId,
+      contextId: effectiveContextId,
+      status: {
+        state: finalState,
+        timestamp: new Date().toISOString(),
+        ...(finalState === "failed" ? { message: { role: "agent", kind: "message", messageId: taskId, parts: [{ kind: "text", text: "Agent execution failed" } as TextPart] } } : {}),
+      },
+      final: true,
+    } as TaskStatusUpdateEvent);
   }
 
   async cancelTask(taskId: string, eventBus: ExecutionEventBus): Promise<void> {
