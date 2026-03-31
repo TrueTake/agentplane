@@ -651,7 +651,6 @@ export const SessionRow = z.object({
   sandbox_id: z.string().nullable(),
   sdk_session_id: z.string().nullable(),
   session_blob_url: z.string().nullable(),
-  context_id: z.string().nullable(),
   status: SessionStatusSchema,
   message_count: z.coerce.number(),
   last_backup_at: z.coerce.string().nullable(),
