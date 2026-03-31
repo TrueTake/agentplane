@@ -896,6 +896,13 @@ export async function createSessionSandbox(config: SessionSandboxConfig): Promis
     }),
   );
 
+  logger.info("createSessionSandbox: callback data", {
+    session_id: config.sessionId,
+    has_callback: !!config.callbackData,
+    tool_count: config.callbackData?.tools?.length ?? 0,
+    url: config.callbackData?.url ?? "none",
+  });
+
   const sandboxRoot = "/vercel/sandbox";
   const pluginFiles = (config.pluginFiles ?? []).map((f) => {
     const resolved = path.resolve(sandboxRoot, f.path);

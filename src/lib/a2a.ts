@@ -867,6 +867,11 @@ export class SandboxAgentExecutor implements AgentExecutor {
     );
 
     // Use prepareSessionSandbox to create sandbox (cold path — no existing sandbox)
+    logger.info("executeFirstSessionMessage: passing callbackData to prepareSessionSandbox", {
+      has_callback: !!callbackData,
+      tool_count: callbackData?.tools?.length ?? 0,
+      url: callbackData?.url ?? "none",
+    });
     let sandbox: SessionSandboxInstance;
     try {
       sandbox = await prepareSessionSandbox(
