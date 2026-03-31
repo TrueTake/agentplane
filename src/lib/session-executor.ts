@@ -211,6 +211,7 @@ export async function prepareSessionSandbox(
     mcpErrors: mcpResult.errors,
     pluginFiles: [...pluginResult.skillFiles, ...pluginResult.agentFiles],
     maxIdleTimeoutMs: DEFAULT_SESSION_TIMEOUT_MS,
+    callbackData: params.callbackData,
   };
 
   const sandbox = await createSessionSandbox(sandboxConfig);
