@@ -55,11 +55,6 @@ npm run test:watch     # vitest watch mode
 npm run migrate        # run DB migrations (requires DATABASE_URL)
 npm run create-tenant  # create a tenant + API key
 npx tsx scripts/create-api-key.ts <tenant-id>  # generate additional API keys
-
-# SDK (sdk/ directory)
-npm run sdk:build      # build SDK (ESM + CJS + DTS)
-npm run sdk:test       # run SDK tests
-npm run sdk:typecheck  # typecheck SDK
 ```
 
 ## Project Structure
@@ -182,25 +177,6 @@ scripts/
   create-api-key.ts       # CLI to generate additional API keys for a tenant
 tests/
   unit/                   # Vitest unit tests
-sdk/                      # TypeScript SDK (published as `@getcatalystiq/agent-plane` npm package)
-  src/
-    client.ts             # AgentPlane class (HTTPS enforcement, closure-based auth)
-    types.ts              # API interfaces (snake_case, matches wire format)
-    errors.ts             # AgentPlaneError + StreamDisconnectedError
-    streaming.ts          # NDJSON parser + RunStream (AsyncIterable)
-    resources/
-      runs.ts             # create, createAndWait, stream, get, list, cancel, transcript
-      agents.ts           # CRUD + nested skills/plugins/connectors/customConnectors
-      skills.ts           # agent skill CRUD (list, get, create, update, delete)
-      plugins.ts          # agent plugin management (list, add, remove)
-      connectors.ts       # Composio connector management (list, saveApiKey, initiateOauth, availableToolkits/Tools)
-      custom-connectors.ts # MCP custom connector management (listServers, list, delete, updateAllowedTools, listTools, initiateOauth)
-      sessions.ts          # session CRUD + message sending (create, get, list, sendMessage, sendMessageAndWait, stop)
-      plugin-marketplaces.ts # marketplace discovery (list, listPlugins) — admin-only for mutations
-    index.ts              # public exports
-  tests/
-    helpers.ts            # shared test utilities (createClient, jsonOk, jsonError)
-    resources/            # per-resource unit tests (vitest)
 ```
 
 ## Database
@@ -298,7 +274,6 @@ All routes (except `/api/health`) require `Authorization: Bearer <api_key>`. Adm
 - Sandbox network policy allowlists: AI Gateway, Composio, Firecrawl, GitHub, npm registry, platform API, custom MCP servers
 - Max 10 concurrent runs per tenant; atomic concurrent run check prevents TOCTOU races
 - Transcript viewer renders markdown via `react-markdown` + `remark-gfm`; HTML sanitized with `dompurify`
-- SDK resource namespaces: `client.runs`, `client.agents`, `client.sessions`, `client.connectors`, `client.customConnectors`, `client.pluginMarketplaces`; agents nests `skills`, `plugins`, `connectors`, `customConnectors`
 - JSONB array mutations use atomic SQL guards (`NOT EXISTS` for uniqueness, `jsonb_array_length` for limits) to prevent TOCTOU races
 - Composio discovery helpers (`listComposioToolkits`, `listComposioTools`) are shared between admin and tenant routes via `src/lib/composio.ts`; tool pagination capped at 10 pages
 - Scheduled runs: cron dispatcher runs every minute, claims due agents, computes next run time, dispatches to executor endpoint

@@ -1,7 +1,7 @@
 # AgentPlane Code Pattern Analysis Report
 
 **Date:** 2026-03-21
-**Scope:** Full codebase (`src/`, `sdk/`, `ui/`)
+**Scope:** Full codebase (`src/`)
 
 ---
 
@@ -19,11 +19,7 @@
 
 **Inconsistencies found:**
 
-1. **SDK types use `snake_case` properties while internal types use `camelCase`** -- This is INTENTIONAL per CLAUDE.md ("snake_case, matches wire format") but undocumented SDK contributors may find this confusing. Consider adding a JSDoc note in `sdk/src/types.ts`.
-
-2. **`ConnectorOauthResult.redirect_url` (snake_case) vs `CustomConnectorOauthResult.redirectUrl` (camelCase)** in `sdk/src/types.ts` -- The SDK already documents this divergence in comments, but it reflects different upstream API conventions leaking into the public SDK surface. This is a real paper-cut for SDK consumers.
-
-3. **Pagination result variable naming:** Admin routes destructure as `{ limit, offset }` while tenant routes assign to `pagination` variable. Minor but inconsistent.
+1. **Pagination result variable naming:** Admin routes destructure as `{ limit, offset }` while tenant routes assign to `pagination` variable. Minor but inconsistent.
 
 ---
 
@@ -40,7 +36,7 @@
 | **Process-level Cache with TTL** | Snapshot cache, MCP server cache, plugin tree cache, Agent Card cache | Consistent pattern across the codebase |
 | **State Machine** | Session lifecycle (`creating -> active -> idle -> stopped`) | Well-defined transitions in `src/lib/sessions.ts` |
 | **Signed State Token** | `oauth-state.ts`, `mcp-oauth-state.ts`, shared via `hmac-state.ts` | Good refactoring -- shared HMAC base |
-| **NDJSON Streaming** | `src/lib/streaming.ts`, `sdk/src/streaming.ts` | Clean async iterable pattern |
+| **NDJSON Streaming** | `src/lib/streaming.ts` | Clean async iterable pattern |
 
 ### Anti-Patterns Found
 
@@ -109,9 +105,7 @@
 
 ### MEDIUM PRIORITY
 
-4. **StreamEvent type definitions duplicated** between `src/lib/types.ts` and `sdk/src/types.ts`. The SDK defines its own `RunStatus`, `SessionStatus`, `StreamEvent` union, etc. These MUST stay in sync manually. No shared package or codegen ensures they match.
-
-5. **`SaveKeySchema` defined twice** -- once in admin connectors route, once in tenant connectors route. Identical `z.object({ toolkit: z.string(), api_key: z.string().min(1) })`.
+4. **`SaveKeySchema` defined twice** -- once in admin connectors route, once in tenant connectors route. Identical `z.object({ toolkit: z.string(), api_key: z.string().min(1) })`.
 
 6. **Pagination parsing** is repeated in 9 route files with the same 3-line pattern. Could be a utility: `parsePagination(request)`.
 
@@ -159,16 +153,13 @@
 1. **Internal branding references:**
    - `getcatalystiq` appears in GitHub URLs on the landing page (`src/app/page.tsx` lines 15, 82, 329, 353)
    - `agentco-bridge` naming throughout `src/lib/sandbox.ts` (lines 299, 300, 328, 331, 333, 381, 387, 395, 550, 842, 843, 875) -- "AgentCo" appears to be an internal/partner product name
-   - `@getcatalystiq/agent-plane` is the npm package name in `sdk/`
    - **Recommendation:** Decide on public-facing naming before open-sourcing. Replace or document AgentCo references.
 
 2. **`src/app/page.tsx` is a marketing page** with specific branding ("Claude Agents as an API"). For open source, this should either be made generic or clearly marked as the hosted version's landing page.
 
 3. **No CONTRIBUTING.md, LICENSE, or CODE_OF_CONDUCT.md** found -- standard open source files are missing.
 
-4. **No JSDoc on public SDK methods** -- `sdk/src/resources/*.ts` methods have minimal documentation. Open source contributors will need these.
-
-5. **`delete-tenant-button.tsx` exists alongside `delete-company-button.tsx`** -- The "tenant" vs "company" naming split (API=tenant, UI=company) could confuse contributors. The `delete-tenant-button.tsx` appears to be a legacy file.
+4. **`delete-tenant-button.tsx` exists alongside `delete-company-button.tsx`** -- The "tenant" vs "company" naming split (API=tenant, UI=company) could confuse contributors. The `delete-tenant-button.tsx` appears to be a legacy file.
 
 ---
 
@@ -185,6 +176,4 @@
 | 7 | Add CONTRIBUTING.md, LICENSE, CODE_OF_CONDUCT.md | High (for OSS) | Low |
 | 8 | Audit and document AgentCo/getcatalystiq references | High (for OSS) | Low |
 | 9 | Split `a2a.ts` (732 lines) into modules | Medium | Medium |
-| 10 | Add JSDoc to SDK public methods | Medium | Medium |
-| 11 | Extract `parsePagination(request)` utility | Low | Low |
-| 12 | Document the `ConnectorOauthResult` vs `CustomConnectorOauthResult` casing divergence more prominently | Low | Low |
+| 10 | Extract `parsePagination(request)` utility | Low | Low |

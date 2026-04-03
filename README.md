@@ -20,7 +20,6 @@ A multi-tenant platform for running AI agents in isolated [Vercel Sandboxes](htt
 - **Generate Soul** — LLM-powered generation of all SoulSpec files from agent configuration (name, description, tools, skills) via AI Gateway
 - **Multi-turn sessions** — persistent conversations with context retention across messages; sandbox kept alive between turns; automatic backup/restore on cold start
 - **Configurable runtime** — set max runtime per agent (60–3600 seconds)
-- **TypeScript SDK** — `@getcatalystiq/agent-plane` npm package with streaming, auto-polling, and typed events
 - **Admin dashboard** — manage companies, agents, runs, connectors, plugins, and schedules; tabbed agent detail (General, Identity, Connectors, Skills, Plugins, Schedules, Runs); AgentCo-inspired design system
 
 ## How It Works
@@ -362,59 +361,6 @@ Vercel Cron jobs are configured in `vercel.json`:
 - **SDK snapshot refresh** — daily at 4:00 AM UTC (pre-builds sandbox snapshot with Claude Agent SDK installed)
 - **Budget reset** — daily at midnight UTC
 
-## TypeScript SDK
-
-The `@getcatalystiq/agent-plane` package provides a typed client for the AgentPlane API.
-
-```bash
-npm install @getcatalystiq/agent-plane
-```
-
-```ts
-import { AgentPlane } from "@getcatalystiq/agent-plane";
-
-const client = new AgentPlane({ apiKey: "ap_live_..." });
-
-// Stream events from a run
-const stream = await client.runs.create({
-  agent_id: "agent_abc123",
-  prompt: "Create a landing page",
-});
-
-for await (const event of stream) {
-  if (event.type === "assistant") {
-    console.log(event.message);
-  }
-}
-
-// Or wait for completion (handles stream detach automatically)
-const run = await client.runs.createAndWait({
-  agent_id: "agent_abc123",
-  prompt: "Fix the login bug",
-});
-
-// Multi-turn session with context retention
-const session = await client.sessions.create({ agent_id: "agent_abc123" });
-
-const stream1 = await client.sessions.sendMessage(session.id, {
-  prompt: "My name is Alice",
-});
-for await (const event of stream1) {
-  if (event.type === "result") console.log(event.result);
-}
-
-const stream2 = await client.sessions.sendMessage(session.id, {
-  prompt: "What is my name?",
-});
-for await (const event of stream2) {
-  if (event.type === "result") console.log(event.result); // "Alice"
-}
-
-await client.sessions.stop(session.id);
-```
-
-See [`sdk/README.md`](sdk/README.md) for full documentation including agent management, error handling, and stream cancellation.
-
 ## Key Commands
 
 ```bash
@@ -424,11 +370,6 @@ npm run test           # run tests (vitest)
 npm run test:watch     # vitest watch mode
 npm run migrate        # apply database migrations
 npm run create-tenant  # create a tenant + API key
-
-# SDK (sdk/ directory)
-npm run sdk:build      # build SDK (ESM + CJS + DTS)
-npm run sdk:test       # run SDK tests
-npm run sdk:typecheck  # typecheck SDK
 ```
 
 ## License

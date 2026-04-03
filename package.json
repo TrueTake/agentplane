@@ -20,21 +20,6 @@
     "multi-tenant",
     "mcp"
   ],
-  "main": "./sdk/dist/index.cjs",
-  "module": "./sdk/dist/index.js",
-  "types": "./sdk/dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": {
-        "types": "./sdk/dist/index.d.ts",
-        "default": "./sdk/dist/index.js"
-      },
-      "require": {
-        "types": "./sdk/dist/index.d.cts",
-        "default": "./sdk/dist/index.cjs"
-      }
-    }
-  },
   "engines": {
     "node": ">=20"
   },
@@ -47,11 +32,7 @@
     "test:watch": "vitest",
     "migrate": "npx tsx src/db/migrate.ts",
     "create-tenant": "npx tsx scripts/create-tenant.ts",
-    "sdk:build": "npm run --prefix sdk build",
-    "sdk:test": "npm run --prefix sdk test",
-    "sdk:typecheck": "npm run --prefix sdk typecheck",
-    "ui:build": "npm run --prefix ui build",
-    "ui:typecheck": "npm run --prefix ui typecheck"
+    "create-api-key": "npx tsx scripts/create-api-key.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "0.3.12",
