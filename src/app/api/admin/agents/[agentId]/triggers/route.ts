@@ -101,25 +101,57 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
   }
 
   // Create the Composio subscription (AgentPlane-side filter_predicate is NOT
-  // passed — it's evaluated post-signature by the webhook route).
-  const { composioTriggerId } = await composioCreateTrigger({
-    userId: agent.tenant_id,
-    triggerType: input.triggerType,
-    connectedAccountId,
-  });
+  // passed — it's evaluated post-signature by the webhook route). Surface the
+  // sanitized upstream message on failure so the operator can act on it,
+  // rather than falling through to the generic 500.
+  let composioTriggerId: string;
+  try {
+    const res = await composioCreateTrigger({
+      userId: agent.tenant_id,
+      triggerType: input.triggerType,
+      connectedAccountId,
+    });
+    composioTriggerId = res.composioTriggerId;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("triggers POST: composio create failed", {
+      tenantId: agent.tenant_id,
+      triggerType: input.triggerType,
+      connectedAccountId,
+      error: message,
+    });
+    return NextResponse.json(
+      { error: { code: "COMPOSIO_CREATE_FAILED", message } },
+      { status: 502 },
+    );
+  }
 
   // Persist the DB row.
-  const row = await insertTrigger({
-    tenantId: agent.tenant_id as TenantId,
-    agentId: agentId as AgentId,
-    toolkitSlug: input.toolkitSlug.toLowerCase(),
-    triggerType: input.triggerType,
-    composioTriggerId,
-    promptTemplate: input.promptTemplate,
-    filterPredicate: input.filterPredicate ?? null,
-    toolAllowlist: input.toolAllowlist,
-    enabled: input.enabled,
-  });
+  let row;
+  try {
+    row = await insertTrigger({
+      tenantId: agent.tenant_id as TenantId,
+      agentId: agentId as AgentId,
+      toolkitSlug: input.toolkitSlug.toLowerCase(),
+      triggerType: input.triggerType,
+      composioTriggerId,
+      promptTemplate: input.promptTemplate,
+      filterPredicate: input.filterPredicate ?? null,
+      toolAllowlist: input.toolAllowlist,
+      enabled: input.enabled,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("triggers POST: insert row failed after composio create", {
+      agentId,
+      composioTriggerId,
+      error: message,
+    });
+    return NextResponse.json(
+      { error: { code: "DB_INSERT_FAILED", message } },
+      { status: 500 },
+    );
+  }
 
   // If the operator flipped enabled on create, fire a separate enable call.
   // Composio's create defaults to enabled=true on some plans, but we call
