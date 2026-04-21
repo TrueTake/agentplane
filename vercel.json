@@ -6,7 +6,9 @@
     { "path": "/api/cron/budget-reset", "schedule": "0 0 * * *" },
     { "path": "/api/cron/scheduled-runs", "schedule": "* * * * *" },
     { "path": "/api/cron/cleanup-sessions", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/refresh-snapshot", "schedule": "0 4 * * *" }
+    { "path": "/api/cron/refresh-snapshot", "schedule": "0 4 * * *" },
+    { "path": "/api/cron/cleanup-webhook-deliveries", "schedule": "30 3 * * *" },
+    { "path": "/api/cron/cascade-cancel-triggers", "schedule": "0 2 * * *" }
   ],
   "functions": {
     "app/api/runs/**": { "supportsCancellation": true },
