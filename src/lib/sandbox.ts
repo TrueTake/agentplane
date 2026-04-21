@@ -153,6 +153,28 @@ export interface SandboxConfig {
   extraAllowedHostnames?: string[];
   /** AgentCo callback data for MCP bridge injection. */
   callbackData?: CallbackData;
+  /**
+   * Optional per-run tool allowlist. When present, the runner is restricted
+   * to exactly these tool keys plus a runner-invariant termination tool.
+   *
+   * Key shape differs between runners (projected upstream in
+   * prepareRunExecution via resolveEffectiveRunner):
+   * - Claude SDK: fully-qualified names like 'mcp__composio__LINEAR_CREATE_ISSUE'
+   *   plus builtin short names.
+   * - Vercel AI SDK: raw client.tools() keys like 'LINEAR_CREATE_ISSUE'
+   *   plus builtin short names.
+   *
+   * Used by webhook-triggered runs (see src/app/api/webhooks/composio/route.ts).
+   * `undefined` preserves the existing non-webhook behavior exactly.
+   */
+  toolAllowlist?: string[];
+  /**
+   * Optional system-prompt addendum appended at runner-level. Used by webhook
+   * runs to inform the model that payload content inside the nonce-delimited
+   * block is untrusted data. Claude SDK uses `appendSystemPrompt`; the AI SDK
+   * runner concatenates onto the existing system prompt.
+   */
+  systemPromptAddendum?: string;
 }
 
 export interface SandboxInstance {
@@ -725,16 +747,26 @@ main().catch(err => {
 
 // --- Claude Agent SDK One-Shot Runner ---
 
-function buildRunnerScript(config: SandboxConfig): string {
+export function buildRunnerScript(config: SandboxConfig): string {
   const hasSkills = config.agent.skills.length > 0;
   const hasPluginContent = (config.pluginFiles ?? []).length > 0;
   const hasMcp = config.mcpServers && Object.keys(config.mcpServers).length > 0;
   const hasCallback = config.callbackData && config.callbackData.tools.length > 0;
   const isSubscription = config.auth?.isSubscription ?? false;
+  // When an explicit allowlist is provided (webhook runs), we own the list and
+  // include fully-qualified mcp__* names for any MCP tools we want enabled, so
+  // the original "suppress allowedTools when MCP/callback is present"
+  // optimization no longer applies. Absent an allowlist, fall back to existing
+  // behavior.
+  const allowedToolsField =
+    config.toolAllowlist !== undefined
+      ? { allowedTools: config.toolAllowlist }
+      : (hasMcp || hasCallback ? {} : { allowedTools: config.agent.allowed_tools });
   const agentConfig = {
     model: config.agent.model.replace(/(\d+)\.(\d+)/g, "$1-$2"),
     permissionMode: config.agent.permission_mode,
-    ...(hasMcp || hasCallback ? {} : { allowedTools: config.agent.allowed_tools }),
+    ...allowedToolsField,
+    ...(config.systemPromptAddendum ? { appendSystemPrompt: config.systemPromptAddendum } : {}),
     maxTurns: config.agent.max_turns,
     ...(!isSubscription ? { maxBudgetUsd: config.agent.max_budget_usd } : {}),
     ...((hasSkills || hasPluginContent) ? { settingSources: ["project"] } : {}),

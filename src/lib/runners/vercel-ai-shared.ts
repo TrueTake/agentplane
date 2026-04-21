@@ -228,8 +228,17 @@ const builtinTools = {
  * MCP client setup: dynamic import, server connection, tool discovery.
  *
  * @param mcpErrorsJson - JSON.stringify'd array of MCP error strings
+ * @param toolAllowlist - Optional flat list of tool keys. When set, both
+ *   `builtinTools` and `mcpTools` are filtered to members of this list AFTER
+ *   the MCP servers have been contacted. `sandbox__complete_task` is always
+ *   preserved as a runner invariant so zero-tool webhook runs can still
+ *   terminate cleanly.
  */
-export function buildMcpSetup(mcpErrorsJson: string): string {
+export function buildMcpSetup(
+  mcpErrorsJson: string,
+  toolAllowlist?: string[] | null,
+): string {
+  const allowlistJson = JSON.stringify(toolAllowlist ?? null);
   return `
 // --- MCP tools ---
 const mcpClients = [];
@@ -275,6 +284,24 @@ try {
   }
 } catch (mcpErr) {
   emit({ type: 'mcp_error', server: '__setup__', error: 'MCP setup failed: ' + (mcpErr.message || String(mcpErr)) });
+}
+
+// --- Per-run tool allowlist filter (webhook runs) ---
+// When set, restrict both builtins and MCP tools to exactly the allowlisted
+// keys, but always preserve the termination tool so zero-tool runs still
+// exit. When null, leave the tool surface untouched (regression guard for
+// non-webhook runs).
+const __toolAllowlist = ${allowlistJson};
+if (Array.isArray(__toolAllowlist)) {
+  const allow = new Set(__toolAllowlist);
+  for (const k of Object.keys(builtinTools)) {
+    if (!allow.has(k) && k !== 'sandbox__complete_task') {
+      delete builtinTools[k];
+    }
+  }
+  mcpTools = Object.fromEntries(
+    Object.entries(mcpTools).filter(([k]) => allow.has(k)),
+  );
 }
 `;
 }

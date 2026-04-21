@@ -126,6 +126,13 @@ export function buildVercelAiRunnerScript(config: SandboxConfig): string {
     systemPromptParts.push(skillsPrompt);
   }
 
+  // Webhook runs append a nonce-addendum that tells the model the payload
+  // block is untrusted data. It lands at system-prompt level so it can't be
+  // overridden by the user prompt.
+  if (config.systemPromptAddendum) {
+    systemPromptParts.push(config.systemPromptAddendum);
+  }
+
   const systemPrompt = systemPromptParts.join("\n\n");
   const mcpErrors = config.mcpErrors || [];
   const skillRegistry = buildSkillRegistry(config.agent.skills, config.pluginFiles);
@@ -143,7 +150,7 @@ const systemPrompt = ${JSON.stringify(systemPrompt)};
 ${buildBraintrustInit()}
 ${buildPreamble()}
 ${buildToolDefinitions(JSON.stringify(skillRegistry))}
-${buildMcpSetup(JSON.stringify(mcpErrors))}
+${buildMcpSetup(JSON.stringify(mcpErrors), config.toolAllowlist ?? null)}
 
 // --- Main execution ---
 async function main() {

@@ -25,6 +25,14 @@ export interface RunExecutionParams {
   extraAllowedHostnames?: string[];
   /** AgentCo callback data for MCP bridge injection. */
   callbackData?: CallbackData;
+  /**
+   * Optional per-run tool allowlist. For webhook runs, pass the dual-form
+   * allowlist from webhook_triggers.tool_allowlist; this function projects
+   * to the runner-appropriate string[] form before handing to the sandbox.
+   */
+  toolAllowlist?: Array<{ claude: string; aiSdk: string }>;
+  /** Optional system-prompt addendum (e.g. the nonce-block guidance from Unit 4). */
+  systemPromptAddendum?: string;
 }
 
 export interface RunExecutionResult {
@@ -41,9 +49,27 @@ export interface RunExecutionResult {
 export async function prepareRunExecution(
   params: RunExecutionParams,
 ): Promise<RunExecutionResult> {
-  const { agent, tenantId, runId, prompt, platformApiUrl, effectiveBudget, effectiveMaxTurns, maxRuntimeSeconds, extraAllowedHostnames, callbackData } = params;
+  const {
+    agent,
+    tenantId,
+    runId,
+    prompt,
+    platformApiUrl,
+    effectiveBudget,
+    effectiveMaxTurns,
+    maxRuntimeSeconds,
+    extraAllowedHostnames,
+    callbackData,
+    toolAllowlist,
+    systemPromptAddendum,
+  } = params;
 
   const effectiveRunner = resolveEffectiveRunner(agent.model, agent.runner);
+  // Project the dual-form allowlist to the flat string[] the active runner
+  // expects. Done here (not in the route) so the route can stay runner-agnostic.
+  const projectedAllowlist = toolAllowlist
+    ? toolAllowlist.map((e) => (effectiveRunner === "vercel-ai-sdk" ? e.aiSdk : e.claude))
+    : undefined;
   const [mcpResult, pluginResult, auth] = await Promise.all([
     buildMcpConfig(agent, tenantId),
     fetchPluginContent(agent.plugins ?? []),
@@ -74,6 +100,8 @@ export async function prepareRunExecution(
     pluginFiles: [...pluginResult.skillFiles, ...pluginResult.agentFiles],
     extraAllowedHostnames: [...(extraAllowedHostnames ?? []), ...auth.extraAllowedHostnames],
     callbackData,
+    toolAllowlist: projectedAllowlist,
+    systemPromptAddendum,
   });
 
   await transitionRunStatus(runId, tenantId, "pending", "running", {
