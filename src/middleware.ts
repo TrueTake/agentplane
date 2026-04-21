@@ -11,6 +11,10 @@ const A2A_AGENT_CARD_RE = /^\/api\/a2a\/[^/]+\/[^/]+\/\.well-known\/agent-card\.
 const A2A_AGENTS_RE = /^\/api\/a2a\/[^/]+\/\.well-known\/agents\.json$/;
 const COMPOSIO_CALLBACK_RE = /^\/api\/agents\/[^/]+\/connectors\/[^/]+\/callback$/;
 const MCP_CALLBACK_RE = /^\/api\/mcp-servers\/[^/]+\/callback$/;
+// Composio webhook ingress. Anchored to this exact path — NOT a /api/webhooks/
+// prefix — so a future /api/webhooks/<anything-else> route doesn't silently
+// inherit unauth bypass. The route authenticates via HMAC signature internally.
+const COMPOSIO_WEBHOOK_RE = /^\/api\/webhooks\/composio$/;
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
@@ -73,6 +77,11 @@ export async function middleware(request: NextRequest) {
 
   // OAuth callbacks are unauthenticated (redirect from external provider)
   if (COMPOSIO_CALLBACK_RE.test(pathname) || MCP_CALLBACK_RE.test(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Composio webhook ingress — HMAC-authenticated inside the route.
+  if (COMPOSIO_WEBHOOK_RE.test(pathname)) {
     return NextResponse.next();
   }
 
