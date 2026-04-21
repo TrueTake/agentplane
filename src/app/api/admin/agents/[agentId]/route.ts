@@ -5,6 +5,17 @@ import { removeToolkitConnections } from "@/lib/composio";
 import { resolveEffectiveRunner, isPermissionModeAllowed } from "@/lib/models";
 import { withErrorHandler } from "@/lib/api";
 import { deriveIdentity } from "@/lib/identity";
+import { logger } from "@/lib/logger";
+import {
+  disableTrigger as composioDisableTrigger,
+  deleteTrigger as composioDeleteTrigger,
+} from "@/lib/composio-triggers";
+import {
+  countActiveTriggers,
+  listTriggers,
+  markTriggersPendingCancelForToolkit,
+} from "@/lib/webhook-triggers";
+import type { AgentId } from "@/lib/types";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +84,25 @@ export const PATCH = withErrorHandler(async (request: NextRequest, context) => {
         { error: { code: "validation_error", message: "Vercel AI SDK runner does not support permission modes other than 'default' and 'bypassPermissions'" } },
         { status: 400 },
       );
+    }
+
+    // R11 (post-save plan-mode transition): forbid switching an agent to plan
+    // mode while it has active triggers. Operator must explicitly disable the
+    // triggers first so we don't silently orphan webhook subscriptions.
+    if (effectivePermission === "plan" && current.permission_mode !== "plan") {
+      const activeCount = await countActiveTriggers(agentId as AgentId);
+      if (activeCount > 0) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "AGENT_HAS_ACTIVE_TRIGGERS",
+              message: `Cannot switch to plan mode while ${activeCount} active trigger(s) exist. Disable or delete them first.`,
+              active_trigger_count: activeCount,
+            },
+          },
+          { status: 400 },
+        );
+      }
     }
   }
 
@@ -161,6 +191,39 @@ export const PATCH = withErrorHandler(async (request: NextRequest, context) => {
     const newSet = new Set(input.composio_toolkits.map((t) => t.toLowerCase()));
     const removed = current.composio_toolkits.filter((t) => !newSet.has(t.toLowerCase()));
     if (removed.length > 0) {
+      // For each removed toolkit, mark any triggers bound to it pending_cancel
+      // AND fire a best-effort disable against Composio so deliveries stop
+      // flowing immediately. The cascade-cancel cron (Unit 8) retires the
+      // subscription for good later.
+      for (const toolkit of removed) {
+        await markTriggersPendingCancelForToolkit(agentId as AgentId, toolkit).catch((err) => {
+          logger.warn("toolkit removal: mark pending_cancel failed", {
+            agentId,
+            toolkit,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+      // Fire-and-forget disable of Composio subscriptions for the removed
+      // toolkits so events stop immediately even if the cascade cron lags.
+      listTriggers(agentId as AgentId)
+        .then(async (triggers) => {
+          const affected = triggers.filter((t) =>
+            removed.map((x) => x.toLowerCase()).includes(t.toolkit_slug.toLowerCase()),
+          );
+          await Promise.allSettled(
+            affected.map((t) =>
+              composioDisableTrigger(t.composio_trigger_id).catch((err) => {
+                logger.warn("toolkit removal: upstream disable failed", {
+                  composioTriggerId: t.composio_trigger_id,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }),
+            ),
+          );
+        })
+        .catch(() => {});
+
       removeToolkitConnections(current.tenant_id, removed).catch(() => {});
     }
   }
@@ -195,6 +258,49 @@ export const DELETE = withErrorHandler(async (_request: NextRequest, context) =>
   // Clean up Composio connections
   if (agent.composio_toolkits.length > 0) {
     removeToolkitConnections(agent.tenant_id, agent.composio_toolkits).catch(() => {});
+  }
+
+  // Webhook triggers: migration 029 defines the agent→trigger FK as
+  // ON DELETE RESTRICT so orphan Composio subscriptions can't be created by
+  // a bare agent delete. The plan's "mark pending_cancel and proceed" intent
+  // is incompatible with RESTRICT (the child rows would still block the
+  // DELETE). We resolve by doing a best-effort upstream disable+delete per
+  // trigger (bounded by Promise.allSettled with a short timeout so a Composio
+  // outage cannot block the agent delete), then hard-delete the trigger rows
+  // inline, then the cascade-delivered webhook_deliveries CASCADE with them.
+  // Tradeoff: if Composio is down we may leave an orphan subscription upstream
+  // that the cascade cron can't reach. Per plan's "agent delete is never
+  // blocked" invariant this is acceptable data loss.
+  const triggersForAgent = await listTriggers(agentId as AgentId);
+  if (triggersForAgent.length > 0) {
+    const COMPOSIO_CLEANUP_TIMEOUT_MS = 5_000;
+    const cleanup = Promise.allSettled(
+      triggersForAgent.map(async (t) => {
+        try {
+          await composioDisableTrigger(t.composio_trigger_id);
+        } catch (err) {
+          logger.warn("agent delete: upstream disable failed", {
+            composioTriggerId: t.composio_trigger_id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        try {
+          await composioDeleteTrigger(t.composio_trigger_id);
+        } catch (err) {
+          logger.warn("agent delete: upstream delete failed", {
+            composioTriggerId: t.composio_trigger_id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    );
+    await Promise.race([
+      cleanup,
+      new Promise<void>((resolve) => setTimeout(resolve, COMPOSIO_CLEANUP_TIMEOUT_MS)),
+    ]);
+    // Hard delete trigger rows so the RESTRICT FK doesn't block the agent
+    // delete below. webhook_deliveries CASCADE on the composite FK.
+    await execute("DELETE FROM webhook_triggers WHERE agent_id = $1", [agentId]);
   }
 
   // Delete related data then the agent
