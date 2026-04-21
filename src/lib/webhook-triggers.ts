@@ -161,6 +161,21 @@ export async function getTriggerById(
   );
 }
 
+/**
+ * Lookup by the Composio-side trigger id (e.g. 'ti_kpe02Fiff9PS'). Used by the
+ * webhook ingress route, where the signed metadata carries Composio's nano id,
+ * not our internal UUID.
+ */
+export async function getTriggerByComposioId(
+  composioTriggerId: string,
+): Promise<WebhookTrigger | null> {
+  return queryOne(
+    WebhookTriggerRow,
+    "SELECT * FROM webhook_triggers WHERE composio_trigger_id = $1",
+    [composioTriggerId],
+  );
+}
+
 export async function insertTrigger(row: InsertTriggerRow): Promise<WebhookTrigger> {
   const inserted = await queryOne(
     WebhookTriggerRow,

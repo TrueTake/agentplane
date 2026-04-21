@@ -28,7 +28,7 @@ import { withErrorHandler, jsonResponse } from "@/lib/api";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { verifyComposioWebhook } from "@/lib/webhook-signature";
 import {
-  getTriggerById,
+  getTriggerByComposioId,
   encryptDeliveryPayload,
 } from "@/lib/webhook-triggers";
 import { renderWebhookPrompt, generateNonce } from "@/lib/webhook-prompt";
@@ -298,7 +298,9 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const { eventId, tenantId: claimedTenantId, triggerId, body: parsedBody } = sig;
 
   // 4. Lookup trigger + enforce cross-tenant routing guard.
-  const trigger = await getTriggerById(triggerId as WebhookTriggerId);
+  //    The signed metadata carries Composio's trigger id (e.g. 'ti_xxx'),
+  //    NOT our internal UUID — look up by composio_trigger_id accordingly.
+  const trigger = await getTriggerByComposioId(triggerId);
   if (!trigger) {
     logger.warn("webhook: trigger not found", {
       received_at: receivedAt,
@@ -340,7 +342,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   if (!tenantLimit.allowed) {
     await persistRateLimitedDelivery(
       tenantId,
-      triggerId as WebhookTriggerId,
+      trigger.id as WebhookTriggerId,
       eventId,
       snapshot,
     ).catch((err) => {
@@ -358,7 +360,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // 6. Dedup INSERT. If no row returned, this is a replay — 200 immediately.
   const deliveryId = await insertDelivery(
     tenantId,
-    triggerId as WebhookTriggerId,
+    trigger.id as WebhookTriggerId,
     eventId,
     snapshot,
   );
