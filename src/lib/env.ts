@@ -18,6 +18,14 @@ const EnvSchema = z.object({
 
   // Composio
   COMPOSIO_API_KEY: z.string().optional(),
+  // HMAC secret for verifying Composio webhook deliveries (Standard Webhooks).
+  // Optional: feature degrades gracefully — triggers can be created but all
+  // deliveries will fail signature verification until the secret is set.
+  COMPOSIO_WEBHOOK_SECRET: z.string().optional(),
+  // Previous secret accepted during rotation. After rotating in the Composio
+  // dashboard: set _PREVIOUS to the old secret, SECRET to the new secret,
+  // deploy, wait for in-flight deliveries to drain (~1 hr), then remove _PREVIOUS.
+  COMPOSIO_WEBHOOK_SECRET_PREVIOUS: z.string().optional(),
 
   // Vercel AI Gateway
   AI_GATEWAY_API_KEY: z.string().min(1, "AI_GATEWAY_API_KEY is required"),
