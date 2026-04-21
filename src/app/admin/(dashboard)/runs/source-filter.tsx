@@ -10,6 +10,7 @@ const SOURCES = [
   { value: "playground", label: "Playground" },
   { value: "chat", label: "Chat" },
   { value: "a2a", label: "A2A" },
+  { value: "webhook", label: "Webhook" },
 ];
 
 export function SourceFilter({ current }: { current: string | null }) {

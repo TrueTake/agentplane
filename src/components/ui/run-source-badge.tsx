@@ -6,6 +6,7 @@ const STYLES: Record<RunTriggeredBy, string> = {
   api: "bg-zinc-500/10 text-zinc-400",
   chat: "bg-green-500/10 text-green-400",
   a2a: "bg-indigo-500/10 text-indigo-400",
+  webhook: "bg-amber-500/10 text-amber-400",
 };
 
 const LABELS: Record<RunTriggeredBy, string> = {
@@ -14,6 +15,7 @@ const LABELS: Record<RunTriggeredBy, string> = {
   playground: "Playground",
   chat: "Chat",
   a2a: "A2A",
+  webhook: "Webhook",
 };
 
 export function RunSourceBadge({ triggeredBy }: { triggeredBy: RunTriggeredBy }) {

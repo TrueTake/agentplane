@@ -27,7 +27,7 @@ const RunWithContext = z.object({
 
 export const dynamic = "force-dynamic";
 
-const VALID_SOURCES = ["api", "schedule", "playground", "chat", "a2a"] as const;
+const VALID_SOURCES = ["api", "schedule", "playground", "chat", "a2a", "webhook"] as const;
 
 export default async function RunsPage({
   searchParams,

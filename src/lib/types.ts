@@ -10,6 +10,8 @@ export type McpConnectionId = string & { readonly __brand: "McpConnectionId" };
 export type PluginMarketplaceId = string & { readonly __brand: "PluginMarketplaceId" };
 export type ScheduleId = string & { readonly __brand: "ScheduleId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
+export type WebhookTriggerId = string & { readonly __brand: "WebhookTriggerId" };
+export type WebhookDeliveryId = string & { readonly __brand: "WebhookDeliveryId" };
 
 export interface AgentPlugin {
   marketplace_id: PluginMarketplaceId;
@@ -17,7 +19,29 @@ export interface AgentPlugin {
 }
 
 export type ScheduleFrequency = "manual" | "hourly" | "daily" | "weekdays" | "weekly";
-export type RunTriggeredBy = "api" | "schedule" | "playground" | "chat" | "a2a";
+export type RunTriggeredBy = "api" | "schedule" | "playground" | "chat" | "a2a" | "webhook";
+
+// Matches migration 029's status CHECK on webhook_deliveries. 'received' is the
+// non-terminal intake state; every other value is terminal and set by the
+// ingress route (src/app/api/webhooks/composio/route.ts).
+export type WebhookDeliveryStatus =
+  | "received"
+  | "accepted"
+  | "rejected_429"
+  | "signature_failed"
+  | "trigger_disabled"
+  | "budget_blocked"
+  | "filtered"
+  | "run_failed_to_create";
+
+// Per-tool allowlist entry. Stored form matches the dual-form shape documented
+// in the plan's Unit 5: Claude SDK wants fully-qualified `mcp__<server>__<tool>`,
+// Vercel AI SDK wants the raw `client.tools()` key. Building both at save time
+// lets prepareRunExecution project to whichever form the active runner needs.
+export interface WebhookTriggerToolEntry {
+  claude: string;
+  aiSdk: string;
+}
 
 export type SessionStatus = "creating" | "active" | "idle" | "stopped";
 
