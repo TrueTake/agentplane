@@ -13,6 +13,9 @@ import { AgentHeaderActions } from "./header-actions";
 import { AgentTabs } from "./agent-tabs";
 import { AgentRuns } from "./agent-runs";
 import { IdentityTab } from "./identity-tab";
+import { TriggersTab } from "./triggers-tab";
+import { listTriggers } from "@/lib/webhook-triggers";
+import type { AgentId } from "@/lib/types";
 import { getCallbackBaseUrl } from "@/lib/mcp-connections";
 
 export const dynamic = "force-dynamic";
@@ -29,13 +32,14 @@ export default async function AgentDetailPage({
 
   const tenant = await queryOne(TenantRow, "SELECT * FROM tenants WHERE id = $1", [agent.tenant_id]);
 
-  const [countResult, schedules] = await Promise.all([
+  const [countResult, schedules, triggers] = await Promise.all([
     queryOne(
       z.object({ total: z.number() }),
       "SELECT COUNT(*)::int AS total FROM runs WHERE agent_id = $1",
       [agentId],
     ),
     query(ScheduleRow, "SELECT * FROM schedules WHERE agent_id = $1 ORDER BY created_at ASC", [agentId]),
+    listTriggers(agentId as AgentId),
   ]);
 
   const totalRuns = countResult?.total ?? 0;
@@ -90,6 +94,14 @@ export default async function AgentDetailPage({
             agentId={agent.id}
             initialSchedules={schedules}
             timezone={tenant?.timezone ?? "UTC"}
+          />
+        }
+        triggers={
+          <TriggersTab
+            agentId={agent.id}
+            permissionMode={agent.permission_mode}
+            availableToolkits={agent.composio_toolkits}
+            initialTriggers={triggers}
           />
         }
       />
