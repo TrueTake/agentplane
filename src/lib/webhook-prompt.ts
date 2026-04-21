@@ -65,10 +65,15 @@ export function renderWebhookPrompt(input: RenderWebhookPromptInput): RenderedWe
 const FIELD_PATTERN = /\{\{\s*([a-zA-Z0-9_.[\]]+?)\s*\}\}/g;
 
 function substituteFields(template: string, payload: unknown, nonce: string): string {
-  return template.replace(FIELD_PATTERN, (_match, path: string) => {
+  return template.replace(FIELD_PATTERN, (_match, rawPath: string) => {
+    // The UI contract is `{{payload.field}}` — strip a leading `payload.`
+    // prefix so it walks from the body root. Paths without the prefix still
+    // work for power users who want to reference e.g. `{{metadata.user_id}}`
+    // directly.
+    const path = rawPath.startsWith("payload.") ? rawPath.slice("payload.".length) : rawPath;
     const value = resolvePath(payload, path);
     if (value === undefined) {
-      logger.debug("webhook-prompt: missing path in payload", { path });
+      logger.debug("webhook-prompt: missing path in payload", { path: rawPath });
       return `<payload_field_${nonce}></payload_field_${nonce}>`;
     }
     const rendered = typeof value === "string" ? value : safeStringify(value);

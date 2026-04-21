@@ -20,7 +20,7 @@
 //
 // Every delivery row transitions from 'received' to exactly one terminal status.
 
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { queryOne, withTenantTransaction } from "@/db";
@@ -440,34 +440,38 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const effectiveMaxTurns = agent.max_turns;
   const maxRuntimeSeconds = agent.max_runtime_seconds;
 
-  // Background dispatch — fire-and-forget. Any failure here marks the delivery
-  // as run_failed_to_create so the audit log reflects the truth even though
-  // the HTTP response already went out.
-  void executeRunInBackground({
-    agent,
-    tenantId,
-    runId,
-    prompt,
-    platformApiUrl: getCallbackBaseUrl(),
-    effectiveBudget,
-    effectiveMaxTurns,
-    maxRuntimeSeconds,
-    toolAllowlist: trigger.tool_allowlist,
-    systemPromptAddendum,
-  }).catch((err) => {
-    logger.error("webhook: background run execution failed", {
-      run_id: runId,
-      tenant_id: tenantId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    setDeliveryStatus(tenantId, deliveryId, "run_failed_to_create").catch(
-      (updErr) => {
-        logger.error("webhook: failed to mark delivery run_failed_to_create", {
-          delivery_id: deliveryId,
-          error: updErr instanceof Error ? updErr.message : String(updErr),
-        });
-      },
-    );
+  // Background dispatch via Next.js after() so Vercel keeps the serverless
+  // function alive past the response. A bare `void promise` would let the
+  // platform terminate the instance before the sandbox ever started.
+  after(async () => {
+    try {
+      await executeRunInBackground({
+        agent,
+        tenantId,
+        runId,
+        prompt,
+        platformApiUrl: getCallbackBaseUrl(),
+        effectiveBudget,
+        effectiveMaxTurns,
+        maxRuntimeSeconds,
+        toolAllowlist: trigger.tool_allowlist,
+        systemPromptAddendum,
+      });
+    } catch (err) {
+      logger.error("webhook: background run execution failed", {
+        run_id: runId,
+        tenant_id: tenantId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await setDeliveryStatus(tenantId, deliveryId, "run_failed_to_create").catch(
+        (updErr) => {
+          logger.error("webhook: failed to mark delivery run_failed_to_create", {
+            delivery_id: deliveryId,
+            error: updErr instanceof Error ? updErr.message : String(updErr),
+          });
+        },
+      );
+    }
   });
 
   await setDeliveryStatus(tenantId, deliveryId, "accepted", runId);

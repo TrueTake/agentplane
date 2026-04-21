@@ -41,7 +41,7 @@ vi.mock("@/lib/webhook-triggers", async () => {
   );
   return {
     ...actual,
-    getTriggerById: vi.fn(),
+    getTriggerByComposioId: vi.fn(),
     // Preserve the actual encrypt re-export (it just wraps crypto.encrypt).
   };
 });
@@ -76,6 +76,22 @@ vi.mock("@/lib/rate-limit", async () => {
   return { ...actual };
 });
 
+// Mock next/server's after() — outside a real Next request context it
+// otherwise throws. Run the callback inline so assertions on what it did
+// (executeRunInBackground, etc.) still work.
+vi.mock("next/server", async () => {
+  const actual = await vi.importActual<typeof import("next/server")>("next/server");
+  return {
+    ...actual,
+    after: (cb: () => void | Promise<void>) => {
+      // Fire and forget — the test harness doesn't await it, but the mocked
+      // executeRunInBackground resolves synchronously-enough for the
+      // delivery-status assertions.
+      Promise.resolve().then(cb);
+    },
+  };
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // Imports under test (after mocks).
 // ─────────────────────────────────────────────────────────────────────────
@@ -83,7 +99,7 @@ vi.mock("@/lib/rate-limit", async () => {
 import { POST, matchesFilter } from "@/app/api/webhooks/composio/route";
 import { queryOne } from "@/db";
 import { verifyComposioWebhook } from "@/lib/webhook-signature";
-import { getTriggerById } from "@/lib/webhook-triggers";
+import { getTriggerByComposioId } from "@/lib/webhook-triggers";
 import { createRun } from "@/lib/runs";
 import { executeRunInBackground } from "@/lib/run-executor";
 import { BudgetExceededError, ConcurrencyLimitError } from "@/lib/errors";
@@ -91,7 +107,7 @@ import type { NextRequest } from "next/server";
 
 const mockQueryOne = queryOne as unknown as ReturnType<typeof vi.fn>;
 const mockVerify = verifyComposioWebhook as unknown as ReturnType<typeof vi.fn>;
-const mockGetTrigger = getTriggerById as unknown as ReturnType<typeof vi.fn>;
+const mockGetTrigger = getTriggerByComposioId as unknown as ReturnType<typeof vi.fn>;
 const mockCreateRun = createRun as unknown as ReturnType<typeof vi.fn>;
 const mockExecuteRun = executeRunInBackground as unknown as ReturnType<typeof vi.fn>;
 
