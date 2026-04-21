@@ -110,6 +110,7 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
       userId: agent.tenant_id,
       triggerType: input.triggerType,
       connectedAccountId,
+      config: input.triggerConfig ?? undefined,
     });
     composioTriggerId = res.composioTriggerId;
   } catch (err) {

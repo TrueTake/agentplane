@@ -58,11 +58,20 @@ export interface ActiveTrigger {
   connectedAccountId: string | null;
 }
 
-/** Sanitize raw Composio errors to tenant-safe messages. Mirrors sanitizeComposioError in composio.ts. */
+/**
+ * Sanitize raw Composio errors to tenant-safe messages. Mirrors
+ * sanitizeComposioError in composio.ts. For validation/invalid-config errors
+ * we preserve the first ~200 chars of the original message because the
+ * operator needs to know WHICH field is invalid (e.g. "missing team_id") —
+ * the generic "Invalid trigger configuration" alone is useless.
+ */
 export function sanitizeComposioTriggersError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/not found/i.test(msg)) return "Composio trigger type not found";
-  if (/invalid/i.test(msg)) return "Invalid trigger configuration";
+  if (/invalid|validation|required|missing/i.test(msg)) {
+    const trimmed = msg.replace(/\s+/g, " ").trim().slice(0, 200);
+    return `Invalid trigger configuration: ${trimmed}`;
+  }
   if (/unauthori[sz]ed|forbidden/i.test(msg)) return "Composio authorization failed";
   if (/timeout/i.test(msg)) return "Composio upstream timeout";
   return "Composio upstream error — please try again";

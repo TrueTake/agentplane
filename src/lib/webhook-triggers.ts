@@ -93,6 +93,10 @@ export const CreateTriggerInput = z
     triggerType: z.string().min(1).max(150),
     promptTemplate: z.string().min(1).max(50_000),
     filterPredicate: FilterPredicateSchema.optional(),
+    // Composio-side subscribe config (e.g. { team_id }). Sent to
+    // client.triggers.create(...).triggerConfig. Distinct from filter_predicate
+    // (which is AgentPlane-side, evaluated post-signature).
+    triggerConfig: z.record(z.string(), z.unknown()).nullable().optional(),
     toolAllowlist: z.array(ToolAllowlistEntrySchema).max(200),
     enabled: z.boolean().default(false),
     confirmZeroTools: z.boolean().optional(),

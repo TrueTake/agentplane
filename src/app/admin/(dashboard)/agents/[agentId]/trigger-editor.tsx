@@ -69,6 +69,8 @@ export function TriggerEditor({
     initial?.filter_predicate ? JSON.stringify(initial.filter_predicate, null, 2) : "",
   );
   const [promptTemplate, setPromptTemplate] = useState<string>(initial?.prompt_template ?? "");
+  const [triggerConfigText, setTriggerConfigText] = useState<string>("");
+  const [triggerConfigError, setTriggerConfigError] = useState<string | null>(null);
   const [allowlistText, setAllowlistText] = useState<string>(
     initial?.tool_allowlist ? serializeAllowlist(initial.tool_allowlist) : "",
   );
@@ -113,24 +115,36 @@ export function TriggerEditor({
 
   const allowlist = useMemo(() => parseAllowlist(allowlistText), [allowlistText]);
 
-  function validateFilter(): { ok: boolean; value: Record<string, unknown> | null } {
-    const trimmed = filterPredicateText.trim();
+  function validateJsonObject(
+    raw: string,
+    setErr: (m: string | null) => void,
+    label: string,
+  ): { ok: boolean; value: Record<string, unknown> | null } {
+    const trimmed = raw.trim();
     if (!trimmed) {
-      setFilterError(null);
+      setErr(null);
       return { ok: true, value: null };
     }
     try {
       const parsed = JSON.parse(trimmed);
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-        setFilterError("Filter predicate must be a JSON object");
+        setErr(`${label} must be a JSON object`);
         return { ok: false, value: null };
       }
-      setFilterError(null);
+      setErr(null);
       return { ok: true, value: parsed as Record<string, unknown> };
     } catch (err) {
-      setFilterError(err instanceof Error ? `Invalid JSON: ${err.message}` : "Invalid JSON");
+      setErr(err instanceof Error ? `Invalid JSON: ${err.message}` : "Invalid JSON");
       return { ok: false, value: null };
     }
+  }
+
+  function validateFilter() {
+    return validateJsonObject(filterPredicateText, setFilterError, "Filter predicate");
+  }
+
+  function validateTriggerConfig() {
+    return validateJsonObject(triggerConfigText, setTriggerConfigError, "Trigger config");
   }
 
   const submit = useCallback(
@@ -140,6 +154,11 @@ export function TriggerEditor({
       try {
         const filter = validateFilter();
         if (!filter.ok) {
+          setSaving(false);
+          return;
+        }
+        const triggerCfg = validateTriggerConfig();
+        if (!triggerCfg.ok) {
           setSaving(false);
           return;
         }
@@ -171,6 +190,7 @@ export function TriggerEditor({
             triggerType,
             promptTemplate,
             filterPredicate: filter.value,
+            triggerConfig: triggerCfg.value,
             toolAllowlist: allowlist,
             enabled,
             ...(confirmZeroTools ? { confirmZeroTools: true } : {}),
@@ -204,6 +224,7 @@ export function TriggerEditor({
       allowlist,
       enabled,
       filterPredicateText,
+      triggerConfigText,
       initial,
       isEdit,
       onSaved,
@@ -305,10 +326,27 @@ export function TriggerEditor({
       </div>
       <FormError error={availableError} />
 
+      {!isEdit && (
+        <FormField
+          label="Trigger config (JSON, Composio-side)"
+          error={triggerConfigError ?? undefined}
+          hint='Required for most trigger types. Example for Linear: {"team_id": "<team-uuid>"}. Check the trigger type instructions.'
+        >
+          <Textarea
+            value={triggerConfigText}
+            onChange={(e) => setTriggerConfigText(e.target.value)}
+            rows={4}
+            placeholder='{"team_id": "..."}'
+            className="font-mono text-xs resize-y min-h-[80px]"
+            disabled={saving}
+          />
+        </FormField>
+      )}
+
       <FormField
-        label="Filter predicate (JSON, optional)"
+        label="Filter predicate (JSON, optional, AgentPlane-side)"
         error={filterError ?? undefined}
-        hint='Example: {"payload.issue.priority": 1}. Empty means all events match.'
+        hint='Evaluated after signature verification. Example: {"payload.issue.priority": 1}. Empty means all events match.'
       >
         <Textarea
           value={filterPredicateText}
