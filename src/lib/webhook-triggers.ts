@@ -12,7 +12,6 @@ import { getEnv } from "@/lib/env";
 import type {
   AgentId,
   TenantId,
-  WebhookDeliveryId,
   WebhookDeliveryStatus,
   WebhookTriggerId,
   WebhookTriggerToolEntry,
