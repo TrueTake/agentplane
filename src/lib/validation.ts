@@ -552,7 +552,7 @@ export const RunRow = z.object({
   error_type: z.string().nullable(),
   error_messages: z.array(z.string()),
   sandbox_id: z.string().nullable(),
-  triggered_by: RunTriggeredBySchema.default("api"),
+  triggered_by: RunTriggeredBySchema.catch("api"),
   created_by_key_id: z.string().nullable().default(null),
   schedule_id: z.string().nullable().default(null),
   session_id: z.string().nullable().default(null),

@@ -14,7 +14,7 @@ const AgentRun = z.object({
   cost_usd: z.coerce.number(),
   num_turns: z.coerce.number(),
   duration_ms: z.coerce.number(),
-  triggered_by: RunTriggeredBySchema.default("api"),
+  triggered_by: RunTriggeredBySchema.catch("api"),
   error_type: z.string().nullable(),
   created_at: z.coerce.string(),
 });
