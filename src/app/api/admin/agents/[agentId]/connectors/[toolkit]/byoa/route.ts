@@ -83,5 +83,23 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
     event: "install",
   });
 
-  return NextResponse.json({ redirect_url: result.redirectUrl });
+  // Per-toolkit OAuth-URL tweaks for attribution. Linear's default OAuth
+  // attributes writes to the authorizing user; `actor=app` tells Linear to
+  // install the app as a bot user so writes attribute to the app itself.
+  // Composio's BYOA flow does not surface this toggle, so we append it.
+  const slug = toolkit.toLowerCase();
+  let redirectUrl = result.redirectUrl;
+  let attributionNote: string | null = null;
+  if (slug === "linear") {
+    const url = new URL(redirectUrl);
+    url.searchParams.set("actor", "app");
+    redirectUrl = url.toString();
+    attributionNote =
+      "Linear's default OAuth attributes writes to the authorizing user. We added actor=app so the OAuth app installs as a bot user — writes will be attributed to the app, not to you. The bot will appear in your Linear workspace's member list after you authorize.";
+  }
+
+  return NextResponse.json({
+    redirect_url: redirectUrl,
+    ...(attributionNote ? { attribution_note: attributionNote } : {}),
+  });
 });

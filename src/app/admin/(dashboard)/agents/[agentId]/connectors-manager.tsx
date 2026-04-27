@@ -120,6 +120,8 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [byoaPopupOpen, setByoaPopupOpen] = useState<Record<string, boolean>>({});
+  const [byoaAuthorizeUrl, setByoaAuthorizeUrl] = useState<Record<string, string>>({});
+  const [byoaAttributionNote, setByoaAttributionNote] = useState<Record<string, string>>({});
   const [recapturing, setRecapturing] = useState<Record<string, boolean>>({});
   const [confirmSwitch, setConfirmSwitch] = useState<{
     slug: string;
@@ -275,7 +277,7 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
     setSaving((s) => ({ ...s, [slug]: true }));
     setErrors((e) => ({ ...e, [slug]: "" }));
     try {
-      const data = await adminFetch<{ redirect_url?: string }>(
+      const data = await adminFetch<{ redirect_url?: string; attribution_note?: string }>(
         `/agents/${agentId}/connectors/${slug}/byoa`,
         {
           method: "POST",
@@ -283,6 +285,8 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
         },
       );
       if (data.redirect_url) {
+        setByoaAuthorizeUrl((u) => ({ ...u, [slug]: data.redirect_url! }));
+        setByoaAttributionNote((n) => ({ ...n, [slug]: data.attribution_note ?? "" }));
         setByoaPopupOpen((p) => ({ ...p, [slug]: true }));
         const popup = window.open(data.redirect_url, "byoa-oauth", "width=600,height=700");
         const handler = (event: MessageEvent) => {
@@ -290,6 +294,8 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
             popup?.close();
             window.removeEventListener("message", handler);
             setByoaPopupOpen((p) => ({ ...p, [slug]: false }));
+            setByoaAuthorizeUrl((u) => ({ ...u, [slug]: "" }));
+            setByoaAttributionNote((n) => ({ ...n, [slug]: "" }));
             setClientIds((c) => ({ ...c, [slug]: "" }));
             setClientSecrets((c) => ({ ...c, [slug]: "" }));
             loadComposio();
@@ -487,6 +493,8 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
                   saving={!!saving[c.slug]}
                   error={errors[c.slug]}
                   byoaPopupOpen={!!byoaPopupOpen[c.slug]}
+                  byoaAuthorizeUrl={byoaAuthorizeUrl[c.slug] ?? ""}
+                  byoaAttributionNote={byoaAttributionNote[c.slug] ?? ""}
                   recapturing={!!recapturing[c.slug]}
                   onSaveToken={handleSaveToken}
                   onInitiateByoa={handleInitiateByoa}
@@ -625,6 +633,8 @@ interface CardProps {
   saving: boolean;
   error: string | undefined;
   byoaPopupOpen: boolean;
+  byoaAuthorizeUrl: string;
+  byoaAttributionNote: string;
   recapturing: boolean;
   onSaveToken: (slug: string, scheme: "API_KEY" | "BEARER_TOKEN") => void;
   onInitiateByoa: (slug: string) => void;
@@ -780,6 +790,36 @@ function ComposioConnectorCard(props: CardProps) {
             {props.byoaPopupOpen ? "Waiting for OAuth..." : props.saving ? "Starting..." : isActive ? "Reconnect with my app" : "Connect"}
           </Button>
           <FormError error={props.error} />
+
+          {props.byoaAuthorizeUrl && (
+            <div className="mt-1 flex flex-col gap-1 rounded-md border border-border/60 bg-muted/30 p-2">
+              {props.byoaAttributionNote && (
+                <p className="text-[10px] text-muted-foreground leading-snug">{props.byoaAttributionNote}</p>
+              )}
+              <div className="flex items-center gap-1">
+                <a
+                  href={props.byoaAuthorizeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-primary hover:underline truncate flex-1"
+                  title={props.byoaAuthorizeUrl}
+                >
+                  Open authorize URL ↗
+                </a>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(props.byoaAuthorizeUrl)}
+                  className="text-[10px] text-muted-foreground hover:text-foreground px-1"
+                  title="Copy authorize URL"
+                >
+                  copy
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-snug">
+                If the popup didn&apos;t open or you want to inspect the URL first, use the link above.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
