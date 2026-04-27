@@ -10,6 +10,8 @@ export type McpConnectionId = string & { readonly __brand: "McpConnectionId" };
 export type PluginMarketplaceId = string & { readonly __brand: "PluginMarketplaceId" };
 export type ScheduleId = string & { readonly __brand: "ScheduleId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
+export type WebhookSourceId = string & { readonly __brand: "WebhookSourceId" };
+export type WebhookDeliveryId = string & { readonly __brand: "WebhookDeliveryId" };
 
 export interface AgentPlugin {
   marketplace_id: PluginMarketplaceId;
@@ -17,7 +19,7 @@ export interface AgentPlugin {
 }
 
 export type ScheduleFrequency = "manual" | "hourly" | "daily" | "weekdays" | "weekly";
-export type RunTriggeredBy = "api" | "schedule" | "playground" | "chat" | "a2a";
+export type RunTriggeredBy = "api" | "schedule" | "playground" | "chat" | "a2a" | "webhook";
 
 export type SessionStatus = "creating" | "active" | "idle" | "stopped";
 
