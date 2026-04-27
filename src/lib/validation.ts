@@ -219,7 +219,7 @@ export const SafePluginFilename = z.string()
 // --- Schedule Validation ---
 
 export const ScheduleFrequencySchema = z.enum(["manual", "hourly", "daily", "weekdays", "weekly"]);
-export const RunTriggeredBySchema = z.enum(["api", "schedule", "playground", "chat", "a2a"]);
+export const RunTriggeredBySchema = z.enum(["api", "schedule", "playground", "chat", "a2a", "webhook"]);
 export const SessionStatusSchema = z.enum(["creating", "active", "idle", "stopped"]);
 export const TimezoneSchema = z.string().min(1).max(100).refine(isValidTimezone, { message: "Invalid IANA timezone" });
 
