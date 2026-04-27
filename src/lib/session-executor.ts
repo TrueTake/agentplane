@@ -23,6 +23,8 @@ import { parseResultEvent, captureTranscript } from "@/lib/transcript-utils";
 import { createNdjsonStream, ndjsonHeaders } from "@/lib/streaming";
 import { logger } from "@/lib/logger";
 import { getEnv } from "@/lib/env";
+import { queryOne } from "@/db";
+import { z } from "zod";
 import type { AgentInternal } from "@/lib/validation";
 import type { RunId, RunStatus, TenantId, AgentId } from "@/lib/types";
 
@@ -324,26 +326,42 @@ export async function finalizeSessionMessage(
   sdkSessionId: string | null,
 ): Promise<void> {
   try {
-    // 1. Persist transcript
+    // 1. Persist transcript — but only if the sandbox runner didn't already
+    // finalize the run via /api/internal/runs/:id/transcript. Both paths
+    // race to do running→completed; the runner upload typically wins, and
+    // the duplicate transition logs a misleading "stale state" warning plus
+    // re-uploads the same transcript blob.
     let resultData: { status: RunStatus; updates: Record<string, unknown> } | null = null;
     if (transcriptChunks.length > 0) {
-      const transcript = transcriptChunks.join("\n") + "\n";
-      const blobUrl = await uploadTranscript(tenantId, runId, transcript);
-      const lastLine = transcriptChunks[transcriptChunks.length - 1];
-      resultData = await parseResultEvent(lastLine);
-
-      await transitionRunStatus(
-        runId,
-        tenantId,
-        "running",
-        resultData?.status ?? "completed",
-        {
-          completed_at: new Date().toISOString(),
-          transcript_blob_url: blobUrl,
-          ...resultData?.updates,
-        },
-        { expectedMaxBudgetUsd: effectiveBudget },
+      const currentRun = await queryOne(
+        z.object({ status: z.string() }),
+        "SELECT status FROM runs WHERE id = $1 AND tenant_id = $2",
+        [runId, tenantId],
       );
+      if (currentRun?.status === "running") {
+        const transcript = transcriptChunks.join("\n") + "\n";
+        const blobUrl = await uploadTranscript(tenantId, runId, transcript);
+        const lastLine = transcriptChunks[transcriptChunks.length - 1];
+        resultData = await parseResultEvent(lastLine);
+
+        await transitionRunStatus(
+          runId,
+          tenantId,
+          "running",
+          resultData?.status ?? "completed",
+          {
+            completed_at: new Date().toISOString(),
+            transcript_blob_url: blobUrl,
+            ...resultData?.updates,
+          },
+          { expectedMaxBudgetUsd: effectiveBudget },
+        );
+      } else {
+        logger.info("Run already finalized by runner, skipping server-side transcript persist", {
+          run_id: runId,
+          status: currentRun?.status,
+        });
+      }
     }
     // 2. Increment message count
     await incrementMessageCount(sessionId, tenantId);

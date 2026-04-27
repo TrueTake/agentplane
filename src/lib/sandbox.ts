@@ -1034,16 +1034,44 @@ function buildSessionSandboxInstance(
       await sandbox.writeFiles([{ path: `${SESSION_FILE_DIR}/${sdkSessionId}.jsonl`, content }]);
     },
     readSessionFile: async (sdkSessionId: string) => {
+      // Try the canonical path first.
       try {
-        return await sandbox.readFileToBuffer({ path: `${SESSION_FILE_DIR}/${sdkSessionId}.jsonl` });
+        const buf = await sandbox.readFileToBuffer({ path: `${SESSION_FILE_DIR}/${sdkSessionId}.jsonl` });
+        if (buf && buf.length > 0) return buf;
+      } catch {
+        // fall through to discovery
+      }
+      // Fallback: discover via `find` — SDK versions / cwd encodings vary
+      // (e.g. ~/.claude/projects/-vercel-sandbox/<sid>.jsonl). Cheaper than
+      // losing the session backup on every message.
+      try {
+        const find = await sandbox.runCommand({
+          cmd: "sh",
+          args: [
+            "-c",
+            `find /vercel/sandbox/.claude $HOME/.claude /root/.claude -name '${sdkSessionId}.jsonl' -type f -print -quit 2>/dev/null`,
+          ],
+        });
+        const stdout = (await find.stdout()).trim();
+        if (find.exitCode === 0 && stdout) {
+          const buf = await sandbox.readFileToBuffer({ path: stdout });
+          if (buf && buf.length > 0) {
+            logger.info("Session file located via fallback discovery", {
+              sandbox_id: sandbox.sandboxId,
+              sdk_session_id: sdkSessionId,
+              discovered_path: stdout,
+            });
+            return buf;
+          }
+        }
       } catch (err) {
-        logger.warn("Failed to read session file from sandbox", {
+        logger.warn("Session file discovery fallback failed", {
           sandbox_id: sandbox.sandboxId,
           sdk_session_id: sdkSessionId,
           error: err instanceof Error ? err.message : String(err),
         });
-        return null;
       }
+      return null;
     },
     updateMcpConfig: (servers, errors) => {
       if (Object.keys(servers).length > 0) {
