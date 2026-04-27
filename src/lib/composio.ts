@@ -225,6 +225,21 @@ async function splitToolkitsForMcp(
 }
 
 /**
+ * Drop entries whose `<TOOLKIT>_` prefix doesn't match any toolkit in `toolkits`.
+ * Used by agent PUT handlers when `composio_toolkits` changes so the persisted
+ * `composio_allowed_tools` JSONB doesn't accumulate orphans (e.g. swapping
+ * `slack` → `slackbot` would otherwise leave stale `SLACK_*` entries).
+ */
+export function pruneAllowedToolsForToolkits(
+  allowedTools: string[] | null | undefined,
+  toolkits: string[],
+): string[] {
+  if (!allowedTools || allowedTools.length === 0) return [];
+  const prefixes = toolkits.map((t) => t.toUpperCase() + "_");
+  return allowedTools.filter((tool) => prefixes.some((p) => tool.startsWith(p)));
+}
+
+/**
  * Resolve the full allowed_tools whitelist. When some toolkits have explicit
  * tool filters and others don't, fetch all tools for unfiltered toolkits so
  * they aren't inadvertently blocked.
