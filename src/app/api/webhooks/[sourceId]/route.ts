@@ -3,12 +3,19 @@ import { execute } from "@/db";
 import { logger } from "@/lib/logger";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { createRun } from "@/lib/runs";
+import { authenticateApiKey } from "@/lib/auth";
+import { withErrorHandler, jsonResponse } from "@/lib/api";
+import { NotFoundError, ConcurrencyLimitError, BudgetExceededError } from "@/lib/errors";
 import {
+  UpdateWebhookSourceSchema,
   attachDeliveryRun,
   buildPromptFromTemplate,
+  deleteWebhookSource,
+  getWebhookSource,
   loadWebhookSource,
   recordDelivery,
   touchSourceLastTriggered,
+  updateWebhookSource,
   verifyAndPrepare,
   type DeliveryError,
 } from "@/lib/webhooks";
@@ -18,7 +25,6 @@ import type {
   TenantId,
   WebhookSourceId,
 } from "@/lib/types";
-import { ConcurrencyLimitError, BudgetExceededError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -249,3 +255,34 @@ export async function POST(
     { status: 202 },
   );
 }
+
+// ─── Tenant CRUD (auth required) ──────────────────────────────────────────────
+//
+// Co-located with the public ingress POST above. The `sourceId` URL segment is
+// the same identifier in both flows; auth is enforced per-method.
+
+export const GET = withErrorHandler(async (request: NextRequest, context) => {
+  const auth = await authenticateApiKey(request.headers.get("authorization"));
+  const { sourceId } = await context!.params;
+  const source = await getWebhookSource(auth.tenantId, sourceId as WebhookSourceId);
+  if (!source) throw new NotFoundError("Webhook source not found");
+  return jsonResponse(source);
+});
+
+export const PATCH = withErrorHandler(async (request: NextRequest, context) => {
+  const auth = await authenticateApiKey(request.headers.get("authorization"));
+  const { sourceId } = await context!.params;
+  const body = await request.json();
+  const patch = UpdateWebhookSourceSchema.parse(body);
+  const source = await updateWebhookSource(auth.tenantId, sourceId as WebhookSourceId, patch);
+  if (!source) throw new NotFoundError("Webhook source not found");
+  return jsonResponse(source);
+});
+
+export const DELETE = withErrorHandler(async (request: NextRequest, context) => {
+  const auth = await authenticateApiKey(request.headers.get("authorization"));
+  const { sourceId } = await context!.params;
+  const removed = await deleteWebhookSource(auth.tenantId, sourceId as WebhookSourceId);
+  if (!removed) throw new NotFoundError("Webhook source not found");
+  return jsonResponse({ deleted: true });
+});

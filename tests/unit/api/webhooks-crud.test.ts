@@ -35,8 +35,8 @@ import {
   GET as itemGet,
   PATCH as itemPatch,
   DELETE as itemDelete,
-} from "@/app/api/webhooks/[id]/route";
-import { POST as rotatePost } from "@/app/api/webhooks/[id]/rotate/route";
+} from "@/app/api/webhooks/[sourceId]/route";
+import { POST as rotatePost } from "@/app/api/webhooks/[sourceId]/rotate/route";
 
 const TENANT_ID = "22222222-2222-4222-8222-222222222222";
 const AGENT_ID = "33333333-3333-4333-8333-333333333333";
@@ -159,7 +159,7 @@ describe("GET /api/webhooks/[id]", () => {
     const req = new Request(`https://app.example.com/api/webhooks/${SOURCE_ID}`, {
       headers: { authorization: "Bearer ap_live_test" },
     }) as unknown as import("next/server").NextRequest;
-    const res = await itemGet(req, { params: Promise.resolve({ id: SOURCE_ID }) });
+    const res = await itemGet(req, { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).not.toHaveProperty("secret_enc");
@@ -171,7 +171,7 @@ describe("GET /api/webhooks/[id]", () => {
     const req = new Request(`https://app.example.com/api/webhooks/${SOURCE_ID}`, {
       headers: { authorization: "Bearer ap_live_test" },
     }) as unknown as import("next/server").NextRequest;
-    const res = await itemGet(req, { params: Promise.resolve({ id: SOURCE_ID }) });
+    const res = await itemGet(req, { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(res.status).toBe(404);
   });
 });
@@ -184,7 +184,7 @@ describe("PATCH /api/webhooks/[id]", () => {
       { enabled: false },
       "PATCH",
     );
-    const res = await itemPatch(req, { params: Promise.resolve({ id: SOURCE_ID }) });
+    const res = await itemPatch(req, { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(res.status).toBe(200);
     expect(mocks.updateWebhookSource).toHaveBeenCalledWith(
       TENANT_ID,
@@ -201,7 +201,7 @@ describe("DELETE /api/webhooks/[id]", () => {
       method: "DELETE",
       headers: { authorization: "Bearer ap_live_test" },
     }) as unknown as import("next/server").NextRequest;
-    const res = await itemDelete(req, { params: Promise.resolve({ id: SOURCE_ID }) });
+    const res = await itemDelete(req, { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(res.status).toBe(200);
     expect((await res.json()).deleted).toBe(true);
   });
@@ -212,7 +212,7 @@ describe("DELETE /api/webhooks/[id]", () => {
       method: "DELETE",
       headers: { authorization: "Bearer ap_live_test" },
     }) as unknown as import("next/server").NextRequest;
-    const res = await itemDelete(req, { params: Promise.resolve({ id: SOURCE_ID }) });
+    const res = await itemDelete(req, { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(res.status).toBe(404);
   });
 });
@@ -226,7 +226,7 @@ describe("POST /api/webhooks/[id]/rotate", () => {
       previousExpiresAt: expires,
     });
     const req = postRequest(`https://app.example.com/api/webhooks/${SOURCE_ID}/rotate`, {});
-    const res = await rotatePost(req, { params: Promise.resolve({ id: SOURCE_ID }) });
+    const res = await rotatePost(req, { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.secret).toBe("whsec_new_one");
@@ -236,7 +236,7 @@ describe("POST /api/webhooks/[id]/rotate", () => {
   it("returns 404 if the source does not belong to the tenant", async () => {
     mocks.getWebhookSource.mockResolvedValueOnce(null);
     const req = postRequest(`https://app.example.com/api/webhooks/${SOURCE_ID}/rotate`, {});
-    const res = await rotatePost(req, { params: Promise.resolve({ id: SOURCE_ID }) });
+    const res = await rotatePost(req, { params: Promise.resolve({ sourceId: SOURCE_ID }) });
     expect(res.status).toBe(404);
     expect(mocks.rotateSecret).not.toHaveBeenCalled();
   });
