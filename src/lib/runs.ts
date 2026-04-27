@@ -10,7 +10,7 @@ import {
   BudgetExceededError,
   ConcurrencyLimitError,
 } from "./errors";
-import type { RunStatus, RunTriggeredBy, TenantId, AgentId, RunId, ScheduleId } from "./types";
+import type { RunStatus, RunTriggeredBy, TenantId, AgentId, RunId, ScheduleId, WebhookSourceId } from "./types";
 import { VALID_TRANSITIONS } from "./types";
 
 const MAX_CONCURRENT_RUNS = 50;
@@ -67,7 +67,7 @@ export async function createRun(
   tenantId: TenantId,
   agentId: AgentId,
   prompt: string,
-  options?: { triggeredBy?: RunTriggeredBy; scheduleId?: ScheduleId; sessionId?: string; createdByKeyId?: string },
+  options?: { triggeredBy?: RunTriggeredBy; scheduleId?: ScheduleId; sessionId?: string; createdByKeyId?: string; webhookSourceId?: WebhookSourceId },
 ): Promise<{ run: z.infer<typeof RunRow>; agent: AgentInternal; remainingBudget: number }> {
   return withTenantTransaction(tenantId, async (tx) => {
     // Load agent (including internal Composio MCP cache fields)
@@ -87,14 +87,15 @@ export async function createRun(
     const scheduleId = options?.scheduleId ?? null;
     const sessionId = options?.sessionId ?? null;
     const createdByKeyId = options?.createdByKeyId ?? null;
+    const webhookSourceId = options?.webhookSourceId ?? null;
     const effectiveRunner = resolveEffectiveRunner(agent.model, agent.runner);
     const inserted = await tx.queryOne(
       RunRow,
-      `INSERT INTO runs (id, agent_id, tenant_id, status, prompt, runner, triggered_by, schedule_id, session_id, created_by_key_id, created_at)
-       SELECT $1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, NOW()
-       WHERE (SELECT COUNT(*) FROM runs WHERE tenant_id = $3 AND status IN ('pending', 'running')) < $10
+      `INSERT INTO runs (id, agent_id, tenant_id, status, prompt, runner, triggered_by, schedule_id, session_id, created_by_key_id, webhook_source_id, created_at)
+       SELECT $1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, NOW()
+       WHERE (SELECT COUNT(*) FROM runs WHERE tenant_id = $3 AND status IN ('pending', 'running')) < $11
        RETURNING *`,
-      [runId, agentId, tenantId, prompt, effectiveRunner, triggeredBy, scheduleId, sessionId, createdByKeyId, MAX_CONCURRENT_RUNS],
+      [runId, agentId, tenantId, prompt, effectiveRunner, triggeredBy, scheduleId, sessionId, createdByKeyId, webhookSourceId, MAX_CONCURRENT_RUNS],
     );
 
     if (!inserted) {
