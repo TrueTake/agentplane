@@ -663,7 +663,10 @@ export async function saveCustomAuthConnector(
   if (!client) throw new Error("Composio not configured");
 
   const slugLower = slug.toLowerCase();
-  const credentialsKey = scheme === "API_KEY" ? "api_key" : "token";
+  // Composio's standard credential field names for use_custom_auth schemes.
+  // `generic_api_key` matches the per-toolkit input form Composio surfaces in
+  // its dashboard for API_KEY toolkits.
+  const credentialsKey = scheme === "API_KEY" ? "generic_api_key" : "token";
 
   const existingCaRes = await client.connectedAccounts.list({
     toolkit_slugs: [slugLower],
@@ -678,7 +681,7 @@ export async function saveCustomAuthConnector(
       type: "custom",
       credentials: { [credentialsKey]: token },
     });
-    logger.info("Updated tenant-scoped auth config shared credentials", {
+    logger.info("Updated tenant-scoped auth config credentials", {
       slug: slugLower,
       id: authConfigId,
       tenant_id: tenantId,
@@ -703,9 +706,20 @@ export async function saveCustomAuthConnector(
     scheme,
   });
 
+  // Pass the credential on the connection state too: Composio validates
+  // required fields at connectedAccounts.create regardless of what's on the
+  // parent auth_config. The state shape is a discriminated union by
+  // authScheme; `val` accepts arbitrary keys ([k: string]: unknown).
   const ca = await client.connectedAccounts.create({
     auth_config: { id: authConfigId },
-    connection: { user_id: tenantId },
+    connection: {
+      user_id: tenantId,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      state: {
+        authScheme: scheme,
+        val: { status: "ACTIVE", [credentialsKey]: token },
+      } as any,
+    },
   });
   logger.info("Created connected account", {
     slug: slugLower,
