@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogBody, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { SectionHeader } from "@/components/ui/section-header";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { adminFetch, AdminApiError } from "@/app/admin/lib/api";
 import { PROVIDER_OPTIONS, PROVIDER_PRESETS, detectProvider } from "./webhook-provider-presets";
 
@@ -312,21 +314,20 @@ function CreateWebhookDialog({
         <DialogBody>
           <div className="space-y-3">
             <div>
-              <label className="block text-xs uppercase text-zinc-500">Name</label>
-              <input
+              <label className="block text-xs font-medium text-foreground mb-1">Name</label>
+              <Input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="github-pr-events"
-                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs uppercase text-zinc-500">Provider</label>
+              <label className="block text-xs font-medium text-foreground mb-1">Provider</label>
               <select
                 value={provider}
                 onChange={(e) => handleProviderChange(e.target.value)}
-                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"
+                className="flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {PROVIDER_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -334,38 +335,38 @@ function CreateWebhookDialog({
               </select>
             </div>
             <div>
-              <label className="block text-xs uppercase text-zinc-500">Signature header</label>
-              <input
+              <label className="block text-xs font-medium text-foreground mb-1">Signature header</label>
+              <Input
                 type="text"
                 value={signatureHeader}
                 onChange={(e) => handleSignatureHeaderChange(e.target.value)}
-                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs"
+                className="font-mono text-xs"
               />
             </div>
             <div>
-              <label className="block text-xs uppercase text-zinc-500">
-                Signing secret <span className="ml-2 normal-case text-zinc-500">(optional)</span>
+              <label className="block text-xs font-medium text-foreground mb-1">
+                Signing secret <span className="ml-1 font-normal text-muted-foreground">(optional)</span>
               </label>
-              <input
+              <Input
                 type="password"
                 value={signingSecret}
                 onChange={(e) => setSigningSecret(e.target.value)}
                 placeholder="Leave empty to auto-generate"
-                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs"
+                className="font-mono text-xs"
               />
             </div>
             <div>
-              <label className="block text-xs uppercase text-zinc-500">
-                Prompt template <span className="ml-2 normal-case text-zinc-500">— supports {"{{payload}}"} and {"{{source.name}}"}</span>
+              <label className="block text-xs font-medium text-foreground mb-1">
+                Prompt template <span className="ml-1 font-normal text-muted-foreground">— supports {"{{payload}}"} and {"{{source.name}}"}</span>
               </label>
-              <textarea
+              <Textarea
                 value={promptTemplate}
                 onChange={(e) => setPromptTemplate(e.target.value)}
                 rows={4}
-                className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-xs"
+                className="font-mono text-xs"
               />
             </div>
-            {error ? <div className="text-sm text-red-400">{error}</div> : null}
+            {error ? <div className="text-sm text-destructive">{error}</div> : null}
           </div>
         </DialogBody>
         <DialogFooter>
