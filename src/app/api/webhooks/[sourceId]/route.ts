@@ -37,6 +37,56 @@ const PER_TENANT_LIMIT = 600;
 const HEADER_TIMESTAMP = "webhook-timestamp";
 const HEADER_DELIVERY_ID = "webhook-delivery-id";
 
+// Common provider-specific headers carrying a per-delivery unique id. Tried in
+// order when the canonical `webhook-delivery-id` header is missing.
+const DELIVERY_ID_HEADER_FALLBACKS = [
+  "x-github-delivery",        // GitHub
+  "linear-delivery",          // Linear (sometimes)
+  "x-vercel-id",              // Vercel
+  "x-shopify-webhook-id",     // Shopify
+  "webhook-id",               // Svix-style (Stripe via Svix, etc.)
+  "x-render-event-id",        // Render
+];
+
+// Body field names commonly carrying the delivery id when no header does.
+const DELIVERY_ID_BODY_FIELDS = ["delivery", "delivery_id", "id", "event_id"];
+
+/**
+ * Resolve a per-delivery unique id from headers, body, or a deterministic
+ * fallback hash. Lets webhooks from providers that don't send our canonical
+ * `webhook-delivery-id` header still be deduped.
+ */
+async function resolveDeliveryId(
+  request: NextRequest,
+  body: string,
+): Promise<string> {
+  const canonical = request.headers.get(HEADER_DELIVERY_ID);
+  if (canonical) return canonical;
+
+  for (const name of DELIVERY_ID_HEADER_FALLBACKS) {
+    const v = request.headers.get(name);
+    if (v) return v;
+  }
+
+  if (body) {
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      for (const field of DELIVERY_ID_BODY_FIELDS) {
+        const v = parsed[field];
+        if (typeof v === "string" && v.length > 0) return v;
+      }
+    } catch {
+      // Body isn't JSON or doesn't contain a known field — fall through.
+    }
+  }
+
+  // Deterministic fallback: identical (body + timestamp) re-deliveries dedupe.
+  // Without a real id this only protects against literal repeats; distinct
+  // events with identical bodies would collide, but that's the best we can do.
+  const ts = request.headers.get(HEADER_TIMESTAMP) ?? "";
+  return "synthetic_" + (await sha256Hex(`${ts}.${body}`)).slice(0, 32);
+}
+
 function genericUnauthorized(): NextResponse {
   return NextResponse.json(
     { error: { code: "unauthorized", message: "Unauthorized" } },
@@ -122,14 +172,6 @@ export async function POST(
     );
   }
 
-  const deliveryId = request.headers.get(HEADER_DELIVERY_ID);
-  if (!deliveryId) {
-    return NextResponse.json(
-      { error: { code: "missing_delivery_id", message: `Missing ${HEADER_DELIVERY_ID} header` } },
-      { status: 400 },
-    );
-  }
-
   const sigHeaderName = source.signature_header.toLowerCase();
   const signature = request.headers.get(sigHeaderName);
   const timestamp = request.headers.get(HEADER_TIMESTAMP);
@@ -141,6 +183,11 @@ export async function POST(
       { status: 413 },
     );
   }
+
+  // Resolve delivery id from canonical header → provider-specific header →
+  // body field → synthetic hash. Providers like Linear put the delivery UUID
+  // in the JSON body rather than a header.
+  const deliveryId = await resolveDeliveryId(request, rawBody);
 
   const payloadHash = await sha256Hex(rawBody);
 
