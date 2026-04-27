@@ -49,7 +49,7 @@ const DELIVERY_ID_HEADER_FALLBACKS = [
 ];
 
 // Body field names commonly carrying the delivery id when no header does.
-const DELIVERY_ID_BODY_FIELDS = ["delivery", "delivery_id", "id", "event_id"];
+const DELIVERY_ID_BODY_FIELDS = ["delivery", "delivery_id", "event_id"];
 
 /**
  * Resolve a per-delivery unique id from headers, body, or a deterministic
@@ -71,20 +71,39 @@ async function resolveDeliveryId(
   if (body) {
     try {
       const parsed = JSON.parse(body) as Record<string, unknown>;
+
+      // Linear-style: `webhookId` (source-level UUID) + `webhookTimestamp`
+      // (per-delivery millis). Combination is unique per delivery and stable
+      // across retries (Linear retries with the same payload).
+      const wid = parsed.webhookId;
+      const wts = parsed.webhookTimestamp;
+      if (typeof wid === "string" && (typeof wts === "string" || typeof wts === "number")) {
+        return `linear_${wid}_${wts}`;
+      }
+
+      // Generic body fields (Stripe, GitHub-as-body, etc.).
       for (const field of DELIVERY_ID_BODY_FIELDS) {
         const v = parsed[field];
         if (typeof v === "string" && v.length > 0) return v;
       }
+
+      // Last body-based attempt: top-level `id` IF the payload also has an
+      // event identifier hint (rules out using a primary entity's id like
+      // an issue.id which would be the same across update events).
+      const id = parsed.id;
+      const hasEventHint = typeof parsed.type === "string" || typeof parsed.action === "string" || typeof parsed.event === "string";
+      if (typeof id === "string" && id.length > 0 && hasEventHint) {
+        return id;
+      }
     } catch {
-      // Body isn't JSON or doesn't contain a known field — fall through.
+      // Body isn't JSON — fall through.
     }
   }
 
-  // Deterministic fallback: identical (body + timestamp) re-deliveries dedupe.
-  // Without a real id this only protects against literal repeats; distinct
-  // events with identical bodies would collide, but that's the best we can do.
-  const ts = request.headers.get(HEADER_TIMESTAMP) ?? "";
-  return "synthetic_" + (await sha256Hex(`${ts}.${body}`)).slice(0, 32);
+  // Deterministic fallback: hash of the body alone. Same body bytes on retry
+  // dedupe; distinct events naturally have distinct bodies. Intentionally
+  // does NOT include the request timestamp header (it varies across retries).
+  return "synthetic_" + (await sha256Hex(body)).slice(0, 32);
 }
 
 function genericUnauthorized(): NextResponse {
