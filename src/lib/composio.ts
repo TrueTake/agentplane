@@ -67,6 +67,7 @@ async function getOrCreateAuthConfig(
 ): Promise<string | null> {
   try {
     // 1. Pin to the auth config attached to this tenant's connected account.
+    //    Authoritative for any auth type (managed OR custom-auth).
     const tenantAccounts = await client.connectedAccounts.list({
       toolkit_slugs: [slug],
       user_ids: [tenantId],
@@ -77,13 +78,31 @@ async function getOrCreateAuthConfig(
       return ownAccount.auth_config.id;
     }
 
-    // 2. No connection yet — create a fresh Composio-managed config for this tenant.
+    // 2. Tenant has no connection yet. Look for an existing
+    //    `use_composio_managed_auth` config to reuse — those carry no
+    //    per-tenant secrets (Composio holds the OAuth credentials), so
+    //    sharing across tenants is safe and matches pre-rewrite behavior.
+    //    `use_custom_auth` configs are explicitly NOT reused — those carry
+    //    per-tenant `shared_credentials` and must remain isolated.
+    const existing = await client.authConfigs.list({ toolkit_slug: slug, limit: 25 });
+    const sharedManaged = existing.items.find((c) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const type = (c as any).type ?? (c as any).auth_config?.type;
+      return c.status === "ENABLED" && type === "use_composio_managed_auth";
+    });
+    if (sharedManaged?.id) {
+      return sharedManaged.id;
+    }
+
+    // 3. No reusable managed config — create one. For toolkits Composio
+    //    doesn't ship managed credentials for, this fails with a known error
+    //    and the caller falls back to no_auth_apps.
     try {
       const result = await client.authConfigs.create({
         toolkit: { slug },
         auth_config: { type: "use_composio_managed_auth" },
       });
-      logger.info("Created Composio-managed auth config for tenant", {
+      logger.info("Created Composio-managed auth config", {
         tenant_id: tenantId,
         slug,
         id: result.auth_config.id,
@@ -92,9 +111,6 @@ async function getOrCreateAuthConfig(
     } catch (createErr) {
       const msg = createErr instanceof Error ? createErr.message : String(createErr);
       if (msg.includes("DefaultAuthConfigNotFound") || msg.includes("managed credentials")) {
-        // Composio doesn't ship managed credentials for this toolkit (typically
-        // API_KEY-only services). Caller must invoke saveCustomAuthConnector or
-        // initiateByoaOAuthConnector to populate one.
         logger.warn("No Composio-managed auth for toolkit; tenant must supply credentials", {
           tenant_id: tenantId,
           slug,

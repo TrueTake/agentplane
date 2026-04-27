@@ -46,6 +46,11 @@ export const GET = withErrorHandler(async (_request: NextRequest, context) => {
     if (meta) {
       reconciled.push({
         ...status,
+        // Prefer the stored scheme (the one the user actually used) over the
+        // first scheme Composio reports. Keeps the card badge in sync with
+        // how the user is actually connected.
+        primaryScheme: meta.auth_scheme ?? status.primaryScheme,
+        authScheme: meta.auth_scheme ?? status.authScheme,
         selectedMethod: meta.auth_method,
         botUserId: meta.bot_user_id,
         displayName: meta.display_name,
