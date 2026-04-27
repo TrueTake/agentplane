@@ -629,7 +629,7 @@ export async function saveCustomAuthConnector(
     const authConfigId = existingCa.auth_config.id;
     await client.authConfigs.update(authConfigId, {
       type: "custom",
-      shared_credentials: { [credentialsKey]: token },
+      credentials: { [credentialsKey]: token },
     });
     logger.info("Updated tenant-scoped auth config shared credentials", {
       slug: slugLower,
@@ -645,7 +645,7 @@ export async function saveCustomAuthConnector(
     auth_config: {
       type: "use_custom_auth",
       authScheme: scheme,
-      shared_credentials: { [credentialsKey]: token },
+      credentials: { [credentialsKey]: token },
     },
   });
   const authConfigId = created.auth_config.id;
@@ -741,7 +741,13 @@ export async function initiateByoaOAuthConnector(
     auth_config: {
       type: "use_custom_auth",
       authScheme: "OAUTH2",
-      shared_credentials: { client_id: clientId, client_secret: clientSecret },
+      // SDK's Credentials type only declares { scopes, user_scopes }, but the
+      // runtime API requires credentials.client_id / client_secret for the
+      // OAuth2 BYOA flow (Composio API error code 301 / Auth_Config_ValidationError
+      // when these are sent under shared_credentials instead). Remove the
+      // suppression below once @composio/client SDK types catch up.
+      // @ts-expect-error — SDK types lag the runtime API
+      credentials: { client_id: clientId, client_secret: clientSecret },
     },
   });
   const authConfigId = created.auth_config.id;
@@ -820,9 +826,12 @@ function extractAccessToken(ca: any): string | null {
   if (val && typeof val === "object" && typeof val.access_token === "string") {
     return val.access_token;
   }
-  // Some custom-auth schemes nest credentials under `shared_credentials.token`
-  // (we never need them on this path, but be defensive).
-  const shared = ca?.auth_config?.shared_credentials;
+  // Some custom-auth schemes nest credentials under `credentials.*` (current
+  // Composio API) or the legacy `shared_credentials.*` shape (older response
+  // version). Read either — Composio responses can carry either depending on
+  // the SDK version that wrote the auth config.
+  const shared =
+    ca?.auth_config?.credentials ?? ca?.auth_config?.shared_credentials;
   if (shared && typeof shared === "object") {
     const candidate = shared.access_token ?? shared.token ?? shared.api_key;
     if (typeof candidate === "string") return candidate;
