@@ -141,10 +141,14 @@ export async function verifyAndPrepare(
   now: Date = new Date(),
 ): Promise<VerifyAndPrepareResult> {
   if (!signature) return { ok: false, error: "missing_signature" };
-  if (!timestamp) return { ok: false, error: "missing_timestamp" };
+
+  // Timestamp is only required for prefixed (`sha256=...`) and Stripe-style
+  // (`t=...,v1=...`) formats. Raw HMAC (Linear, Vercel, Sentry) carries no
+  // timestamp at all — verifySignature handles that path without one.
+  const ts = timestamp ?? "";
 
   const currentSecret = await decryptSecret(source.secret_enc);
-  const currentResult = await verifySignature(currentSecret, signature, timestamp, rawBody);
+  const currentResult = await verifySignature(currentSecret, signature, ts, rawBody);
   if (currentResult.valid) return { ok: true, usedPrevious: false };
 
   const previousActive =
@@ -157,7 +161,7 @@ export async function verifyAndPrepare(
     const previousResult = await verifySignature(
       previousSecret,
       signature,
-      timestamp,
+      ts,
       rawBody,
     );
     if (previousResult.valid) return { ok: true, usedPrevious: true };
