@@ -14,6 +14,33 @@ export const PAYLOAD_TRUNCATE_BYTES = 256 * 1024;
 export const PAYLOAD_TRUNCATION_MARKER = "\n[payload truncated]";
 export const ROTATION_OVERLAP_DAYS = 7;
 
+export const CreateWebhookSourceSchema = z.object({
+  agent_id: z.string().uuid(),
+  name: z.string().min(1).max(100),
+  prompt_template: z.string().min(1).max(10_000),
+  signature_header: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[A-Za-z0-9-]+$/, "signature_header must be a valid HTTP header name")
+    .optional(),
+  enabled: z.boolean().optional(),
+});
+export type CreateWebhookSourceInput = z.infer<typeof CreateWebhookSourceSchema>;
+
+export const UpdateWebhookSourceSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  prompt_template: z.string().min(1).max(10_000).optional(),
+  signature_header: z
+    .string()
+    .min(1)
+    .max(100)
+    .regex(/^[A-Za-z0-9-]+$/, "signature_header must be a valid HTTP header name")
+    .optional(),
+  enabled: z.boolean().optional(),
+});
+export type UpdateWebhookSourceInput = z.infer<typeof UpdateWebhookSourceSchema>;
+
 export const WebhookSourceRow = z.object({
   id: z.string(),
   tenant_id: z.string(),
@@ -31,6 +58,17 @@ export const WebhookSourceRow = z.object({
   updated_at: z.coerce.date(),
 });
 export type WebhookSourceRow = z.infer<typeof WebhookSourceRow>;
+
+const PUBLIC_SOURCE_COLUMNS =
+  "id, tenant_id, agent_id, name, enabled, signature_header, signature_format, " +
+  "prompt_template, last_triggered_at, created_at, updated_at";
+
+export const PublicWebhookSourceRow = WebhookSourceRow.omit({
+  secret_enc: true,
+  previous_secret_enc: true,
+  previous_secret_expires_at: true,
+});
+export type PublicWebhookSourceRow = z.infer<typeof PublicWebhookSourceRow>;
 
 export const WebhookDeliveryRow = z.object({
   id: z.string(),
@@ -274,6 +312,89 @@ export interface CreateWebhookSourceParams {
 export interface CreateWebhookSourceResult {
   source: WebhookSourceRow;
   secret: string;
+}
+
+export async function listWebhookSources(
+  tenantId: TenantId,
+  agentId?: AgentId,
+): Promise<PublicWebhookSourceRow[]> {
+  if (agentId) {
+    return query(
+      PublicWebhookSourceRow,
+      `SELECT ${PUBLIC_SOURCE_COLUMNS}
+       FROM webhook_sources
+       WHERE tenant_id = $1 AND agent_id = $2
+       ORDER BY created_at DESC`,
+      [tenantId, agentId],
+    );
+  }
+  return query(
+    PublicWebhookSourceRow,
+    `SELECT ${PUBLIC_SOURCE_COLUMNS}
+     FROM webhook_sources
+     WHERE tenant_id = $1
+     ORDER BY created_at DESC`,
+    [tenantId],
+  );
+}
+
+export async function getWebhookSource(
+  tenantId: TenantId,
+  sourceId: WebhookSourceId,
+): Promise<PublicWebhookSourceRow | null> {
+  return queryOne(
+    PublicWebhookSourceRow,
+    `SELECT ${PUBLIC_SOURCE_COLUMNS}
+     FROM webhook_sources
+     WHERE id = $1 AND tenant_id = $2`,
+    [sourceId, tenantId],
+  );
+}
+
+export async function updateWebhookSource(
+  tenantId: TenantId,
+  sourceId: WebhookSourceId,
+  patch: UpdateWebhookSourceInput,
+): Promise<PublicWebhookSourceRow | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [sourceId, tenantId];
+  let i = params.length;
+  if (patch.name !== undefined) {
+    params.push(patch.name);
+    sets.push(`name = $${++i}`);
+  }
+  if (patch.prompt_template !== undefined) {
+    params.push(patch.prompt_template);
+    sets.push(`prompt_template = $${++i}`);
+  }
+  if (patch.signature_header !== undefined) {
+    params.push(patch.signature_header);
+    sets.push(`signature_header = $${++i}`);
+  }
+  if (patch.enabled !== undefined) {
+    params.push(patch.enabled);
+    sets.push(`enabled = $${++i}`);
+  }
+  if (sets.length === 0) return getWebhookSource(tenantId, sourceId);
+  return queryOne(
+    PublicWebhookSourceRow,
+    `UPDATE webhook_sources
+     SET ${sets.join(", ")}, updated_at = now()
+     WHERE id = $1 AND tenant_id = $2
+     RETURNING ${PUBLIC_SOURCE_COLUMNS}`,
+    params,
+  );
+}
+
+export async function deleteWebhookSource(
+  tenantId: TenantId,
+  sourceId: WebhookSourceId,
+): Promise<boolean> {
+  const result = await execute(
+    `DELETE FROM webhook_sources WHERE id = $1 AND tenant_id = $2`,
+    [sourceId, tenantId],
+  );
+  return result.rowCount > 0;
 }
 
 export async function createWebhookSource(
