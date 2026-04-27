@@ -144,9 +144,14 @@ export async function verifyAndPrepare(
 ): Promise<VerifyAndPrepareResult> {
   if (!signature) return { ok: false, error: "missing_signature" };
 
-  // Timestamp is only required for prefixed (`sha256=...`) and Stripe-style
+  // Timestamp is required for prefixed (`sha256=...`) and Stripe-style
   // (`t=...,v1=...`) formats. Raw HMAC (Linear, Vercel, Sentry) carries no
   // timestamp at all — verifySignature handles that path without one.
+  const requiresTimestamp =
+    signature.startsWith("sha256=") || signature.startsWith("t=");
+  if (requiresTimestamp && !timestamp) {
+    return { ok: false, error: "missing_timestamp" };
+  }
   const ts = timestamp ?? "";
 
   const currentSecret = await decryptSecret(source.secret_enc);
