@@ -196,7 +196,7 @@ Neon Postgres with Row-Level Security (RLS). Tables: `tenants`, `api_keys`, `age
 - Agent names are unique per tenant
 - RLS enforced via `app.current_tenant_id` session config (fail-closed via `NULLIF`)
 - Tenant-scoped transactions via `withTenantTransaction()`
-- Migrations: numbered SQL files in `src/db/migrations/` (currently 001–029), run via `npm run migrate`
+- Migrations: numbered SQL files in `src/db/migrations/` (currently 001–030), run via `npm run migrate`
 - `tenants` table includes: `timezone` column for schedule evaluation, `logo_url` (base64 data URL or external URL)
 - `agents` table includes: Composio MCP cache columns, `composio_allowed_tools` (per-toolkit tool filtering), `composio_connection_metadata` JSONB (per-toolkit `auth_method` + `bot_user_id` + `display_name` for the auth-method picker), `skills` JSONB, `plugins` JSONB, schedule columns (`schedule_frequency`, `schedule_time`, `schedule_day_of_week`, `schedule_prompt`, `schedule_enabled`, `last_run_at`, `next_run_at`), `max_runtime_seconds` (60–3600, default 600), `a2a_enabled` (boolean, default false; partial index on `tenant_id WHERE a2a_enabled = true`), SoulSpec v0.5 identity columns (`soul_md`, `identity_md`, `style_md`, `agents_md`, `heartbeat_md`, `user_template_md`, `examples_good_md`, `examples_bad_md`, `soul_spec_version` TEXT default '0.5', `identity` JSONB auto-derived)
 - `tenants` table includes: `clawsouls_api_token` (encrypted, for ClawSouls registry publish)
