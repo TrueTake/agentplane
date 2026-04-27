@@ -699,14 +699,18 @@ function ComposioConnectorCard(props: CardProps) {
         <span className="text-xs text-muted-foreground">Not connected</span>
       )}
 
-      {isActive && (c.captureDeferred || (!c.botUserId && c.selectedMethod)) && (
+      {isActive && (c.captureDeferred || !c.botUserId) && (
         <button
           type="button"
           className="text-xs text-primary hover:underline text-left"
           disabled={props.recapturing}
           onClick={() => props.onRecapture(c.slug)}
         >
-          {props.recapturing ? "Capturing identity..." : "Re-capture identity"}
+          {props.recapturing
+            ? "Capturing identity..."
+            : c.botUserId
+              ? "Re-capture identity"
+              : "Capture identity"}
         </button>
       )}
 
