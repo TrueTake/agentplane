@@ -13,6 +13,7 @@ import { AgentHeaderActions } from "./header-actions";
 import { AgentTabs } from "./agent-tabs";
 import { AgentRuns } from "./agent-runs";
 import { IdentityTab } from "./identity-tab";
+import { WebhooksManager } from "./webhooks-manager";
 import { getCallbackBaseUrl } from "@/lib/mcp-connections";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +91,13 @@ export default async function AgentDetailPage({
             agentId={agent.id}
             initialSchedules={schedules}
             timezone={tenant?.timezone ?? "UTC"}
+          />
+        }
+        webhooks={
+          <WebhooksManager
+            agentId={agent.id}
+            tenantId={agent.tenant_id}
+            baseUrl={getCallbackBaseUrl()}
           />
         }
       />
