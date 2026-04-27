@@ -9,7 +9,7 @@ A multi-tenant platform for running AI agents in isolated Vercel Sandboxes, expo
 **Core concepts:**
 - **Tenant** — isolated workspace with its own API keys, agents, budget, and timezone
 - **Agent** — configuration (model, runner, tools, permissions, skills, plugins, git repo, schedule, max runtime). Supports any Vercel AI Gateway model. Runner auto-selected: Claude Agent SDK for Anthropic models, Vercel AI SDK (ToolLoopAgent) for all others
-- **Run** — a single agent execution triggered by API, schedule, playground, chat, or A2A; streams NDJSON events; tracks `triggered_by` source
+- **Run** — a single agent execution triggered by API, schedule, playground, chat, A2A, or webhook; streams NDJSON events; tracks `triggered_by` source
 - **Session** — persistent multi-turn conversation with sandbox kept alive; uses Claude Agent SDK `resume: sessionId` for context preservation; each message creates a run with `triggered_by: 'chat'`
 - **Schedule** — per-agent cron configuration (manual/hourly/daily/weekdays/weekly) with timezone-aware execution
 - **MCP Server** — tenant-scoped custom OAuth-authenticated tool server; agents connect via OAuth 2.1 PKCE
@@ -24,6 +24,15 @@ A multi-tenant platform for running AI agents in isolated Vercel Sandboxes, expo
 5. `RunBackedTaskStore` bridges A2A Task state to run status (status-only UPDATEs, deduplicated)
 6. `finalizeRun()` persists transcript, records billing, stops sandbox
 7. Final A2A status event published; SSE stream closes with `[DONE]` sentinel
+
+**Execution flow (webhook):**
+1. External system POSTs to `/api/webhooks/{source_id}` (public, no auth header) with `Webhook-Timestamp`, `Webhook-Delivery-Id`, and a configurable signature header carrying `sha256=<hex>` HMAC over `{timestamp}.{raw_body}`
+2. Per-source (60/min) and per-tenant (600/min) rate limits via in-memory limiter; oversized bodies (>512KB) rejected with 413
+3. Source loaded by id (unauthenticated lookup); generic 401 returned for unknown / disabled / bad-sig / stale-timestamp (anti-enumeration)
+4. Signature verified with current secret, falling back to previous secret during a 7-day rotation overlap
+5. Delivery row inserted with `ON CONFLICT (source_id, delivery_id) DO NOTHING`; duplicate replays return 200 with the original `run_id`
+6. Prompt rendered from per-source `prompt_template` (`{{payload}}`, `{{source.name}}` placeholders; payload truncated at 256KB) and `createRun()` invoked with `triggered_by: 'webhook'` and `webhook_source_id` set
+7. Response is 202 Accepted with `{ run_id, status_url }`; the run executes asynchronously through the same `prepareRunExecution` / `finalizeRun` pipeline as one-shot runs
 
 **Execution flow (one-shot runs):**
 1. Client POSTs to `/api/agents/:id/runs` (or `/api/runs`) with a prompt
@@ -186,15 +195,17 @@ Neon Postgres with Row-Level Security (RLS). Tables: `tenants`, `api_keys`, `age
 - Agent names are unique per tenant
 - RLS enforced via `app.current_tenant_id` session config (fail-closed via `NULLIF`)
 - Tenant-scoped transactions via `withTenantTransaction()`
-- Migrations: numbered SQL files in `src/db/migrations/` (currently 001–022), run via `npm run migrate`
+- Migrations: numbered SQL files in `src/db/migrations/` (currently 001–029), run via `npm run migrate`
 - `tenants` table includes: `timezone` column for schedule evaluation, `logo_url` (base64 data URL or external URL)
 - `agents` table includes: Composio MCP cache columns, `composio_allowed_tools` (per-toolkit tool filtering), `skills` JSONB, `plugins` JSONB, schedule columns (`schedule_frequency`, `schedule_time`, `schedule_day_of_week`, `schedule_prompt`, `schedule_enabled`, `last_run_at`, `next_run_at`), `max_runtime_seconds` (60–3600, default 600), `a2a_enabled` (boolean, default false; partial index on `tenant_id WHERE a2a_enabled = true`), SoulSpec v0.5 identity columns (`soul_md`, `identity_md`, `style_md`, `agents_md`, `heartbeat_md`, `user_template_md`, `examples_good_md`, `examples_bad_md`, `soul_spec_version` TEXT default '0.5', `identity` JSONB auto-derived)
 - `tenants` table includes: `clawsouls_api_token` (encrypted, for ClawSouls registry publish)
-- `runs` table includes: `triggered_by` column (`api`, `schedule`, `playground`, `chat`, `a2a`) to track run source; `created_by_key_id` FK to api_keys (audit trail for A2A); `session_id` FK to sessions table for chat messages
+- `runs` table includes: `triggered_by` column (`api`, `schedule`, `playground`, `chat`, `a2a`, `webhook`) to track run source; `created_by_key_id` FK to api_keys (audit trail for A2A); `session_id` FK to sessions table for chat messages; `webhook_source_id` FK to webhook_sources for webhook-triggered runs (NULL for all other sources)
 - `sessions` table includes: `sandbox_id` (NULL when stopped), `sdk_session_id` (Claude Agent SDK session), `session_blob_url` (Vercel Blob backup), `status` (creating/active/idle/stopped), `message_count`, `idle_since`, `last_backup_at`; state machine: creating→active/idle/stopped, active→idle/stopped, idle→active/stopped; max 5 concurrent sessions per tenant
 - `mcp_servers` — tenant-scoped registry (OAuth 2.1 client credentials, RLS enforced); unique slug per tenant
 - `mcp_connections` — per-agent OAuth connections (tenant-scoped RLS, unique per agent-server pair)
 - `plugin_marketplaces` — tenant-scoped registry of GitHub repos (RLS enforced); unique github_repo per tenant; optional encrypted GitHub token for push-to-repo editing
+- `webhook_sources` — tenant-scoped inbound webhook registry (RLS enforced); per-source HMAC secret encrypted at rest with 7-day rotation overlap, configurable signature header, prompt template; unique name per tenant
+- `webhook_deliveries` — per-request audit log + idempotency key store; `UNIQUE (source_id, delivery_id)` powers the 200-duplicate dedupe path; cascades on source delete
 
 ## Environment Variables
 
