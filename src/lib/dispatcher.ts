@@ -497,7 +497,13 @@ async function runMessageStream(
   // session-executor.prepareSessionSandbox).
   const effectiveRunner = resolveEffectiveRunner(agent.model, agent.runner);
   const skipPluginRefresh = !!session.sandbox_id && isMcpFresh(session);
-  const mcpPromise = buildMcpConfig(agent, input.tenantId);
+  // buildMcpConfig touches RLS-protected tables (agents UPDATE, mcp_connections
+  // SELECT) — must run inside a tenant-scoped transaction so app.current_tenant_id
+  // is set. Otherwise the agent UPDATE silently writes 0 rows and Composio MCP
+  // never wires up.
+  const mcpPromise = withTenantTransaction(input.tenantId, () =>
+    buildMcpConfig(agent, input.tenantId),
+  );
   const pluginPromise = skipPluginRefresh
     ? Promise.resolve(EMPTY_PLUGINS)
     : fetchPluginContent(agent.plugins ?? []);
