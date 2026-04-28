@@ -34,7 +34,10 @@ import type {
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// 5 min cap matches /api/runs and /api/cron/scheduled-runs. The POST replies
+// 202 in milliseconds, but `after()` runs `executeRunInBackground` inline and
+// is bound by this maxDuration — a lower cap kills the agent mid-run.
+export const maxDuration = 300;
 
 const MAX_BODY_BYTES = 512 * 1024;
 const RATE_WINDOW_MS = 60_000;
