@@ -856,6 +856,15 @@ export async function initiateByoaOAuthConnector(
 
   const slugLower = slug.toLowerCase();
 
+  // Per-toolkit scope overrides for BYOA. Linear's `actor=app` flow rejects
+  // the `admin` scope ("App users can't request admin scopes"), and Composio's
+  // default Linear auth_config requests it, so we explicitly narrow scopes for
+  // Linear here. Other toolkits inherit Composio's defaults (undefined).
+  const scopes: string[] | undefined =
+    slugLower === "linear"
+      ? ["read", "write", "issues:create", "comments:create"]
+      : undefined;
+
   const created = await client.authConfigs.create({
     toolkit: { slug: slugLower },
     auth_config: {
@@ -867,7 +876,7 @@ export async function initiateByoaOAuthConnector(
       // when these are sent under shared_credentials instead). Remove the
       // suppression below once @composio/client SDK types catch up.
       // @ts-expect-error — SDK types lag the runtime API
-      credentials: { client_id: clientId, client_secret: clientSecret },
+      credentials: { client_id: clientId, client_secret: clientSecret, ...(scopes ? { scopes } : {}) },
     },
   });
   const authConfigId = created.auth_config.id;
