@@ -287,29 +287,66 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
       if (data.redirect_url) {
         setByoaAuthorizeUrl((u) => ({ ...u, [slug]: data.redirect_url! }));
         setByoaAttributionNote((n) => ({ ...n, [slug]: data.attribution_note ?? "" }));
-        setByoaPopupOpen((p) => ({ ...p, [slug]: true }));
-        const popup = window.open(data.redirect_url, "byoa-oauth", "width=600,height=700");
-        const handler = (event: MessageEvent) => {
-          if (event.data?.type === "agent_plane_oauth_callback" && event.data.toolkit === slug) {
-            popup?.close();
-            window.removeEventListener("message", handler);
-            setByoaPopupOpen((p) => ({ ...p, [slug]: false }));
-            setByoaAuthorizeUrl((u) => ({ ...u, [slug]: "" }));
-            setByoaAttributionNote((n) => ({ ...n, [slug]: "" }));
-            setClientIds((c) => ({ ...c, [slug]: "" }));
-            setClientSecrets((c) => ({ ...c, [slug]: "" }));
-            loadComposio();
-            router.refresh();
-          }
+
+        const finishConnection = () => {
+          setByoaPopupOpen((p) => ({ ...p, [slug]: false }));
+          setByoaAuthorizeUrl((u) => ({ ...u, [slug]: "" }));
+          setByoaAttributionNote((n) => ({ ...n, [slug]: "" }));
+          setClientIds((c) => ({ ...c, [slug]: "" }));
+          setClientSecrets((c) => ({ ...c, [slug]: "" }));
+          loadComposio();
+          router.refresh();
         };
-        window.addEventListener("message", handler);
-        const closeWatch = setInterval(() => {
-          if (popup?.closed) {
-            clearInterval(closeWatch);
-            window.removeEventListener("message", handler);
-            setByoaPopupOpen((p) => ({ ...p, [slug]: false }));
-          }
-        }, 500);
+
+        // Linear's BYOA flow uses `actor=app`, which means the user MUST land on
+        // a Linear-hosted authorize page in their main browser session — popup
+        // windows often inherit a different cookie jar / SSO state and silently
+        // fail. We already render the authorize URL inline, so for Linear we
+        // skip the popup entirely and rely on URL + polling instead.
+        const usePopup = slug !== "linear";
+
+        setByoaPopupOpen((p) => ({ ...p, [slug]: true }));
+
+        if (usePopup) {
+          const popup = window.open(data.redirect_url, "byoa-oauth", "width=600,height=700");
+          const handler = (event: MessageEvent) => {
+            if (event.data?.type === "agent_plane_oauth_callback" && event.data.toolkit === slug) {
+              popup?.close();
+              window.removeEventListener("message", handler);
+              finishConnection();
+            }
+          };
+          window.addEventListener("message", handler);
+          const closeWatch = setInterval(() => {
+            if (popup?.closed) {
+              clearInterval(closeWatch);
+              window.removeEventListener("message", handler);
+              setByoaPopupOpen((p) => ({ ...p, [slug]: false }));
+            }
+          }, 500);
+        } else {
+          // No popup — poll the connectors list until this slug flips to ACTIVE.
+          // Stops on success, on connector removal, or after ~10 min.
+          const startedAt = Date.now();
+          const poll = setInterval(async () => {
+            if (Date.now() - startedAt > 10 * 60 * 1000) {
+              clearInterval(poll);
+              setByoaPopupOpen((p) => ({ ...p, [slug]: false }));
+              return;
+            }
+            try {
+              const fresh = await adminFetch<{ connectors: ConnectorStatus[] }>(`/agents/${agentId}/connectors`);
+              const match = (fresh.connectors ?? []).find((x) => x.slug === slug);
+              if (match?.connectionStatus === "ACTIVE" && match.selectedMethod === "byoa_oauth") {
+                clearInterval(poll);
+                setConnectors(fresh.connectors ?? []);
+                finishConnection();
+              }
+            } catch {
+              // transient — keep polling
+            }
+          }, 3000);
+        }
       }
     } catch (err) {
       setErrors((e) => ({ ...e, [slug]: err instanceof Error ? err.message : "Unknown error" }));
@@ -818,7 +855,7 @@ function ComposioConnectorCard(props: CardProps) {
                 </button>
               </div>
               <p className="text-[10px] text-muted-foreground leading-snug">
-                If the popup didn&apos;t open or you want to inspect the URL first, use the link above.
+                Open the authorize URL in your browser to complete the connection. This page will update automatically once the authorization completes.
               </p>
             </div>
           )}
