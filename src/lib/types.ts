@@ -4,12 +4,12 @@ export type { RunnerType } from "./models";
 export type TenantId = string & { readonly __brand: "TenantId" };
 export type AgentId = string & { readonly __brand: "AgentId" };
 export type AgentSlug = string & { readonly __brand: "AgentSlug" };
-export type RunId = string & { readonly __brand: "RunId" };
 export type McpServerId = string & { readonly __brand: "McpServerId" };
 export type McpConnectionId = string & { readonly __brand: "McpConnectionId" };
 export type PluginMarketplaceId = string & { readonly __brand: "PluginMarketplaceId" };
 export type ScheduleId = string & { readonly __brand: "ScheduleId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
+export type SessionMessageId = string & { readonly __brand: "SessionMessageId" };
 export type WebhookSourceId = string & { readonly __brand: "WebhookSourceId" };
 export type WebhookDeliveryId = string & { readonly __brand: "WebhookDeliveryId" };
 

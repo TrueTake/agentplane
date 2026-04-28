@@ -531,37 +531,55 @@ export const OAuthMetadataSchema = z.object({
   code_challenge_methods_supported: z.array(z.string()).optional(),
 });
 
-export const RunRow = z.object({
+// --- Session Message status (mirrors legacy RunStatus values; "queued" replaces "pending") ---
+
+export const SessionMessageStatusSchema = z.enum([
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "timed_out",
+]);
+
+export type SessionMessageStatus = z.infer<typeof SessionMessageStatusSchema>;
+
+// SessionMessageRow — one row per execution. Replaces the legacy RunRow. All
+// billing-grade and audit fields live here at the message grain. Mirrors the
+// columns defined in migration 033_runs_sessions_unify.sql.
+export const SessionMessageRow = z.object({
   id: z.string(),
-  agent_id: z.string(),
+  session_id: z.string(),
   tenant_id: z.string(),
-  status: z.enum(["pending", "running", "completed", "failed", "cancelled", "timed_out"]),
   prompt: z.string(),
-  result_summary: z.string().nullable(),
+  status: SessionMessageStatusSchema,
+  triggered_by: RunTriggeredBySchema.catch("api"),
+  runner: RunnerTypeSchema.nullable().default(null),
+  cost_usd: z.coerce.number(),
   total_input_tokens: z.coerce.number(),
   total_output_tokens: z.coerce.number(),
   cache_read_tokens: z.coerce.number(),
   cache_creation_tokens: z.coerce.number(),
-  cost_usd: z.coerce.number().nullable(),
   num_turns: z.coerce.number(),
   duration_ms: z.coerce.number(),
   duration_api_ms: z.coerce.number(),
   model_usage: z.unknown().nullable(),
-  runner: RunnerTypeSchema.nullable().default("claude-agent-sdk"),
   transcript_blob_url: z.string().nullable(),
+  result_summary: z.string().nullable(),
   error_type: z.string().nullable(),
   error_messages: z.array(z.string()),
-  sandbox_id: z.string().nullable(),
-  triggered_by: RunTriggeredBySchema.catch("api"),
+  webhook_source_id: z.string().nullable().default(null),
   created_by_key_id: z.string().nullable().default(null),
-  schedule_id: z.string().nullable().default(null),
-  session_id: z.string().nullable().default(null),
   started_at: z.coerce.string().nullable(),
   completed_at: z.coerce.string().nullable(),
   created_at: z.coerce.string(),
+  // Convenience fields populated by JOINs in list queries; optional/nullable.
+  agent_id: z.string().nullable().optional(),
   agent_name: z.string().nullable().optional(),
   agent_model: z.string().nullable().optional(),
 });
+
+export type SessionMessage = z.infer<typeof SessionMessageRow>;
 
 // --- Schedule DB Row & CRUD Schemas ---
 
@@ -644,6 +662,10 @@ export const SendMessageSchema = z.object({
 
 export type SendMessageInput = z.infer<typeof SendMessageSchema>;
 
+// SessionRow — mirrors the unified `sessions` table from migration 033. Adds
+// `ephemeral`, `idle_ttl_seconds`, and `expires_at` to the legacy session
+// shape. `last_message_at` is removed — the same information is derivable
+// from `session_messages.completed_at` and would otherwise drift.
 export const SessionRow = z.object({
   id: z.string(),
   tenant_id: z.string(),
@@ -651,15 +673,17 @@ export const SessionRow = z.object({
   sandbox_id: z.string().nullable(),
   sdk_session_id: z.string().nullable(),
   session_blob_url: z.string().nullable(),
-  context_id: z.string().nullable().default(null),
   status: SessionStatusSchema,
+  ephemeral: z.boolean().default(false),
+  idle_ttl_seconds: z.coerce.number().int().default(600),
+  expires_at: z.coerce.string(),
+  context_id: z.string().nullable().default(null),
   message_count: z.coerce.number(),
+  idle_since: z.coerce.string().nullable(),
   last_backup_at: z.coerce.string().nullable(),
   mcp_refreshed_at: z.coerce.string().nullable(),
-  idle_since: z.coerce.string().nullable(),
   created_at: z.coerce.string(),
   updated_at: z.coerce.string(),
-  last_message_at: z.coerce.string().nullable(),
 });
 
 export type Session = z.infer<typeof SessionRow>;
