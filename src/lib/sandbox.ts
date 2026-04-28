@@ -1234,6 +1234,67 @@ export async function reconnectSandbox(sandboxId: string): Promise<SandboxInstan
   }
 }
 
+/**
+ * Read-only reconnect that exposes just enough of SessionSandboxInstance to
+ * back up the SDK session file. Used by the internal transcript route, which
+ * has no agent/auth/MCP context — it just needs to pull the session JSONL
+ * out of the still-running sandbox after the runner subprocess exits.
+ *
+ * The returned instance throws on any non-read methods so misuse fails loudly.
+ */
+export async function reconnectSessionSandboxForBackup(
+  sandboxId: string,
+): Promise<SessionSandboxInstance | null> {
+  let sandbox: Sandbox;
+  try {
+    sandbox = await Sandbox.get({ sandboxId });
+  } catch {
+    return null;
+  }
+  const notSupported = () => {
+    throw new Error("reconnectSessionSandboxForBackup: write/run methods not available on read-only handle");
+  };
+  return {
+    id: sandbox.sandboxId,
+    sandboxRef: sandbox,
+    stop: () => sandbox.stop(),
+    logs: () => ({ [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true as const, value: "" }) }) }),
+    extendTimeout: async (ms: number) => {
+      try { await sandbox.extendTimeout(ms); } catch { /* best effort */ }
+    },
+    runMessage: notSupported,
+    writeSessionFile: notSupported,
+    updateMcpConfig: notSupported,
+    readSessionFile: async (sdkSessionId: string) => {
+      try {
+        const buf = await sandbox.readFileToBuffer({
+          path: `/vercel/sandbox/.claude/projects/vercel/sandbox/${sdkSessionId}.jsonl`,
+        });
+        if (buf && buf.length > 0) return buf;
+      } catch {
+        // fall through to discovery
+      }
+      try {
+        const find = await sandbox.runCommand({
+          cmd: "sh",
+          args: [
+            "-c",
+            `find /vercel/sandbox/.claude $HOME/.claude /root/.claude -name '${sdkSessionId}.jsonl' -type f -print -quit 2>/dev/null`,
+          ],
+        });
+        const stdout = (await find.stdout()).trim();
+        if (find.exitCode === 0 && stdout) {
+          const buf = await sandbox.readFileToBuffer({ path: stdout });
+          if (buf && buf.length > 0) return buf;
+        }
+      } catch {
+        /* swallow — caller handles null */
+      }
+      return null;
+    },
+  };
+}
+
 export async function reconnectSessionSandbox(
   sandboxId: string,
   config: SessionSandboxConfig,

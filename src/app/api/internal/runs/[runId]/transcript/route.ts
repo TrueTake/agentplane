@@ -7,6 +7,8 @@ import { uploadTranscript } from "@/lib/transcripts";
 import { transitionRunStatus } from "@/lib/runs";
 import { parseResultEvent, NO_TERMINAL_EVENT_FALLBACK } from "@/lib/transcript-utils";
 import { processLineAssets } from "@/lib/assets";
+import { reconnectSessionSandboxForBackup } from "@/lib/sandbox";
+import { finalizeSessionTail } from "@/lib/session-executor";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
 import type { RunId, TenantId } from "@/lib/types";
@@ -17,6 +19,9 @@ const RunRow = z.object({
   id: z.string(),
   tenant_id: z.string(),
   status: z.string(),
+  session_id: z.string().nullable(),
+  sandbox_id: z.string().nullable(),
+  sdk_session_id: z.string().nullable(),
   max_budget_usd: z.coerce.number().optional(),
 });
 
@@ -41,11 +46,15 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
     return jsonResponse({ error: { code: "unauthorized", message: "Invalid run token" } }, 401);
   }
 
-  // Look up the run
+  // Look up the run (with session join so we can run the session tail when
+  // this run was triggered by a chat message)
   const run = await queryOne(
     RunRow,
-    `SELECT r.id, r.tenant_id, r.status, a.max_budget_usd
-     FROM runs r JOIN agents a ON a.id = r.agent_id
+    `SELECT r.id, r.tenant_id, r.status, r.session_id, a.max_budget_usd,
+            s.sandbox_id, s.sdk_session_id
+     FROM runs r
+     JOIN agents a ON a.id = r.agent_id
+     LEFT JOIN sessions s ON s.id = r.session_id
      WHERE r.id = $1`,
     [runId],
   );
@@ -90,6 +99,43 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
     );
 
     logger.info("Internal transcript uploaded", { run_id: runId, lines: lines.length });
+
+    // Session-tail: when a chat message run is finalized via the runner-driven
+    // upload path (e.g. after the platform stream detached at 4.5 min), the
+    // session is still pinned to "active" and the SDK session file is still
+    // unbacked. Reconnect read-only to the sandbox, back up the file, and
+    // flip the session active→idle. Best-effort — runErrors here must not
+    // fail the run, which has already terminated.
+    if (run.session_id && run.sandbox_id) {
+      try {
+        const sandbox = await reconnectSessionSandboxForBackup(run.sandbox_id);
+        if (!sandbox) {
+          logger.warn("Session sandbox gone before tail finalize; flipping session idle without backup", {
+            run_id: runId,
+            session_id: run.session_id,
+            sandbox_id: run.sandbox_id,
+          });
+        }
+        await finalizeSessionTail({
+          runId: typedRunId,
+          tenantId,
+          sessionId: run.session_id,
+          // If the sandbox is gone, finalizeSessionTail will skip the backup
+          // (sdkSessionId becomes null) and just transition the session.
+          sandbox: sandbox ?? ({
+            // Stub: only used if sdkSessionId is non-null; we null it below.
+          } as never),
+          sdkSessionId: sandbox ? run.sdk_session_id : null,
+        });
+      } catch (tailErr) {
+        logger.error("Session tail finalize from internal transcript route failed", {
+          run_id: runId,
+          session_id: run.session_id,
+          error: tailErr instanceof Error ? tailErr.message : String(tailErr),
+        });
+      }
+    }
+
     return jsonResponse({ status: "ok" });
   } catch (err) {
     logger.error("Internal transcript upload failed", {

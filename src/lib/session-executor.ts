@@ -312,6 +312,79 @@ export async function executeSessionMessage(
 }
 
 /**
+ * Session-tail work that must run after a session message's run reaches a
+ * terminal state: bump the message count, back up the SDK session file from
+ * the sandbox, and flip the session active→idle. Safe to call from either
+ * the in-process stream finalizer or the runner-driven internal transcript
+ * upload route — both must run this exactly once per message.
+ *
+ * Best-effort: a failure here will not flip the run back to failed, since the
+ * run has already reached a terminal status. We log and force the session
+ * idle so subsequent messages aren't blocked.
+ */
+export async function finalizeSessionTail(params: {
+  runId: RunId;
+  tenantId: TenantId;
+  sessionId: string;
+  sandbox: SessionSandboxInstance;
+  sdkSessionId: string | null;
+}): Promise<void> {
+  const { runId, tenantId, sessionId, sandbox, sdkSessionId } = params;
+  try {
+    await incrementMessageCount(sessionId, tenantId);
+
+    let sessionBlobUrl: string | null = null;
+    if (sdkSessionId) {
+      sessionBlobUrl = await backupSessionFile(
+        sandbox,
+        tenantId as TenantId,
+        sessionId,
+        sdkSessionId,
+      );
+      if (!sessionBlobUrl) {
+        logger.error("Session file backup failed — cold start will lose context since last successful backup", {
+          run_id: runId,
+          session_id: sessionId,
+          sdk_session_id: sdkSessionId,
+        });
+      }
+    }
+
+    await transitionSessionStatus(
+      sessionId,
+      tenantId,
+      "active",
+      "idle",
+      {
+        idle_since: new Date().toISOString(),
+        last_message_at: new Date().toISOString(),
+        ...(sdkSessionId ? { sdk_session_id: sdkSessionId } : {}),
+        ...(sessionBlobUrl ? { session_blob_url: sessionBlobUrl, last_backup_at: new Date().toISOString() } : {}),
+      },
+    );
+  } catch (err) {
+    logger.error("Session tail finalize failed", {
+      run_id: runId,
+      session_id: sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    await transitionSessionStatus(
+      sessionId,
+      tenantId,
+      "active",
+      "idle",
+      { idle_since: new Date().toISOString() },
+    ).catch((inner) => {
+      logger.error("Best-effort session idle transition failed", {
+        run_id: runId,
+        session_id: sessionId,
+        error: inner instanceof Error ? inner.message : String(inner),
+      });
+    });
+  }
+}
+
+/**
  * Finalize a session message: persist transcript, update run, backup session file.
  * Does NOT stop sandbox. Session transitions to idle.
  * CRITICAL: This must complete BEFORE the response stream closes.
@@ -331,7 +404,7 @@ export async function finalizeSessionMessage(
     // race to do running→completed; the runner upload typically wins, and
     // the duplicate transition logs a misleading "stale state" warning plus
     // re-uploads the same transcript blob.
-    let resultData: { status: RunStatus; updates: Record<string, unknown> } | null = null;
+    let runAlreadyFinalized = false;
     if (transcriptChunks.length > 0) {
       const currentRun = await queryOne(
         z.object({ status: z.string() }),
@@ -342,7 +415,7 @@ export async function finalizeSessionMessage(
         const transcript = transcriptChunks.join("\n") + "\n";
         const blobUrl = await uploadTranscript(tenantId, runId, transcript);
         const lastLine = transcriptChunks[transcriptChunks.length - 1];
-        resultData = (await parseResultEvent(lastLine)) ?? NO_TERMINAL_EVENT_FALLBACK;
+        const resultData = (await parseResultEvent(lastLine)) ?? NO_TERMINAL_EVENT_FALLBACK;
 
         await transitionRunStatus(
           runId,
@@ -357,46 +430,20 @@ export async function finalizeSessionMessage(
           { expectedMaxBudgetUsd: effectiveBudget },
         );
       } else {
+        runAlreadyFinalized = true;
         logger.info("Run already finalized by runner, skipping server-side transcript persist", {
           run_id: runId,
           status: currentRun?.status,
         });
       }
     }
-    // 2. Increment message count
-    await incrementMessageCount(sessionId, tenantId);
 
-    // 3. Back up session file SYNCHRONOUSLY (before response ends)
-    let sessionBlobUrl: string | null = null;
-    if (sdkSessionId) {
-      sessionBlobUrl = await backupSessionFile(
-        sandbox,
-        tenantId as TenantId,
-        sessionId,
-        sdkSessionId,
-      );
-      if (!sessionBlobUrl) {
-        logger.error("Session file backup failed — cold start will lose context since last successful backup", {
-          run_id: runId,
-          session_id: sessionId,
-          sdk_session_id: sdkSessionId,
-        });
-      }
+    // If the runner already finalized the run, the runner-driven internal
+    // transcript route is responsible for the session tail too — skip here
+    // to avoid double backups / racing transitions.
+    if (!runAlreadyFinalized) {
+      await finalizeSessionTail({ runId, tenantId, sessionId, sandbox, sdkSessionId });
     }
-
-    // 4. Transition session to idle
-    await transitionSessionStatus(
-      sessionId,
-      tenantId,
-      "active",
-      "idle",
-      {
-        idle_since: new Date().toISOString(),
-        last_message_at: new Date().toISOString(),
-        ...(sdkSessionId ? { sdk_session_id: sdkSessionId } : {}),
-        ...(sessionBlobUrl ? { session_blob_url: sessionBlobUrl, last_backup_at: new Date().toISOString() } : {}),
-      },
-    );
   } catch (err) {
     logger.error("Failed to finalize session message", {
       run_id: runId,
@@ -463,6 +510,9 @@ export function createSessionStreamResponse(
       yield line;
     }
 
+    // Stream finished naturally (runner subprocess exited and closed stdout).
+    // If we already detached at the 4.5-minute mark, the runner-driven internal
+    // transcript route owns finalization — skip to avoid racing it.
     if (!detached) {
       await finalizeSessionMessage(
         runId,
@@ -479,23 +529,20 @@ export function createSessionStreamResponse(
   const stream = createNdjsonStream({
     runId,
     logIterator: streamWithFinalize(),
+    // CRITICAL: do NOT call finalizeSessionMessage here. The runner subprocess
+    // is still running in the sandbox; the buffered transcriptChunks at this
+    // point typically end on a tool_result, not the SDK's terminal `result`
+    // event, so calling finalize would mark the run failed with
+    // `no_terminal_event` and lose the real result. The runner uploads the
+    // full transcript via /api/internal/runs/:id/transcript when it finishes,
+    // and that route handles the session-tail work for runs with session_id.
+    // The cleanup-sessions cron's stuck-active watchdog covers the case where
+    // the runner never uploads at all.
     onDetach: () => {
       detached = true;
-      logger.info("Session stream detached", { session_id: sessionId, run_id: runId });
-      finalizeSessionMessage(
-        runId,
-        tenantId,
-        sessionId,
-        transcriptChunks,
-        effectiveBudget,
-        sandbox,
-        sdkSessionIdRef.value,
-      ).catch((err) => {
-        logger.error("Detached session finalization failed", {
-          session_id: sessionId,
-          run_id: runId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      logger.info("Session stream detached — runner will finalize via internal upload", {
+        session_id: sessionId,
+        run_id: runId,
       });
     },
   });

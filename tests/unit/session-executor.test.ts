@@ -77,6 +77,7 @@ import { transitionSessionStatus, incrementMessageCount, updateSessionSandbox } 
 import { backupSessionFile, restoreSessionFile } from "@/lib/session-files";
 import { parseResultEvent } from "@/lib/transcript-utils";
 import { createSessionSandbox, reconnectSessionSandbox } from "@/lib/sandbox";
+import { queryOne } from "@/db";
 import type { RunId, TenantId } from "@/lib/types";
 import type { SessionSandboxInstance } from "@/lib/sandbox";
 
@@ -107,6 +108,10 @@ describe("finalizeSessionMessage", () => {
       status: "completed",
       updates: { result_summary: "success", cost_usd: 0.01 },
     });
+    // Default: run is still "running", so finalizeSessionMessage owns the
+    // transcript persist + session tail. Tests that simulate the
+    // already-finalized path override this to a non-running status.
+    vi.mocked(queryOne).mockResolvedValue({ status: "running" });
   });
 
   it("persists transcript, increments message count, backs up session, transitions to idle", async () => {
@@ -180,21 +185,21 @@ describe("finalizeSessionMessage", () => {
     expect(incrementMessageCount).not.toHaveBeenCalled();
   });
 
-  it("transitions session to idle even when run status transition fails on stale state", async () => {
-    // Internal endpoint already completed the run — transitionRunStatus returns false
-    vi.mocked(transitionRunStatus).mockResolvedValue(false);
+  it("skips session tail when run was already finalized by the runner", async () => {
+    // Internal transcript route reached terminal state first — current run
+    // status is non-running, so the in-process finalizer must NOT race the
+    // session tail (the internal route now owns it).
+    vi.mocked(queryOne).mockResolvedValue({ status: "completed" });
 
     const chunks = [JSON.stringify({ type: "result", subtype: "success" })];
 
     await finalizeSessionMessage(runId, tenantId, sessionId, chunks, 1.0, mockSandbox, sdkSessionId);
 
-    // Should still complete remaining steps
-    expect(incrementMessageCount).toHaveBeenCalled();
-    expect(backupSessionFile).toHaveBeenCalled();
-    expect(transitionSessionStatus).toHaveBeenCalledWith(
-      sessionId, tenantId, "active", "idle",
-      expect.objectContaining({ sdk_session_id: sdkSessionId }),
-    );
+    expect(uploadTranscript).not.toHaveBeenCalled();
+    expect(transitionRunStatus).not.toHaveBeenCalled();
+    expect(incrementMessageCount).not.toHaveBeenCalled();
+    expect(backupSessionFile).not.toHaveBeenCalled();
+    expect(transitionSessionStatus).not.toHaveBeenCalled();
   });
 
   it("handles session backup failure without crashing", async () => {
