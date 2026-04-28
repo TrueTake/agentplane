@@ -4,6 +4,7 @@ import { withErrorHandler, jsonResponse } from "@/lib/api";
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { AgentRowInternal, TenantRow, ScheduleRow } from "@/lib/validation";
 import { dispatchSessionMessage } from "@/lib/dispatcher";
+import { findWarmScheduleSession } from "@/lib/sessions";
 import { transitionMessageStatus } from "@/lib/session-messages";
 import { BudgetExceededError, ConcurrencyLimitError } from "@/lib/errors";
 import { getCallbackBaseUrl } from "@/lib/mcp-connections";
@@ -62,11 +63,28 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // the dispatcher's per-trigger default) lets a follow-up cron tick reuse
   // the warm sandbox. The cleanup cron stops idle schedule sessions after
   // the per-row TTL elapses.
+  // FIX #6 (adv-003): try to reuse a warm session created by a previous
+  // schedule tick. The dispatcher's CAS handles the race with the cleanup
+  // cron (and falls back gracefully — for internal triggers a stopped
+  // session does NOT throw, the dispatcher auto-creates).
+  let warmSessionId: string | undefined;
+  try {
+    const warm = await findWarmScheduleSession(tenantId, agentId);
+    if (warm) warmSessionId = warm.id;
+  } catch (err) {
+    logger.warn("findWarmScheduleSession lookup failed (non-fatal)", {
+      schedule_id,
+      agent_id: agent.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   let messageId: string;
   try {
     const dispatchResult = await dispatchSessionMessage({
       tenantId,
       agentId,
+      sessionId: warmSessionId,
       prompt: schedule.prompt,
       triggeredBy: "schedule",
       ephemeral: false,

@@ -9,6 +9,7 @@ import { transitionMessageStatus } from "@/lib/session-messages";
 import { parseResultEvent, NO_TERMINAL_EVENT_FALLBACK } from "@/lib/transcript-utils";
 import { processLineAssets } from "@/lib/assets";
 import { reconnectSandbox } from "@/lib/sandbox";
+import { casActiveToIdle } from "@/lib/sessions";
 import { logger } from "@/lib/logger";
 import type { TenantId } from "@/lib/types";
 
@@ -158,6 +159,33 @@ export const POST = withErrorHandler(async (request: NextRequest, context) => {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    }
+
+    // FIX #2: persistent (ephemeral=false) detached path.
+    // When the dispatcher stream detached at 4.5min, finalizeMessage is
+    // skipped — the session remains in 'active' until the 30min watchdog,
+    // and subsequent message dispatches 409. CAS active → idle here so
+    // follow-up messages can claim the slot. Sandbox stays warm.
+    // The helper is a no-op for ephemeral sessions (already stopped above)
+    // and races safely with any live dispatcher finalize.
+    try {
+      const flipped = await casActiveToIdle(
+        message.session_id,
+        tenantId,
+        messageId,
+      );
+      if (flipped) {
+        logger.info("Persistent session flipped active→idle (detached path)", {
+          message_id: messageId,
+          session_id: message.session_id,
+        });
+      }
+    } catch (err) {
+      logger.warn("casActiveToIdle failed (non-fatal)", {
+        message_id: messageId,
+        session_id: message.session_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     return jsonResponse({ status: "ok" });

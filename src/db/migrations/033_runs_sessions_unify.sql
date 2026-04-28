@@ -27,15 +27,25 @@
 DO $$
 DECLARE
   r RECORD;
+  has_runs BOOLEAN;
 BEGIN
-  FOR r IN
-    SELECT con.conname, con.conrelid::regclass::text AS tbl
-    FROM pg_constraint con
-    WHERE con.contype = 'f'
-      AND con.confrelid = 'runs'::regclass
-  LOOP
-    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.tbl, r.conname);
-  END LOOP;
+  -- Idempotent: the table may already be gone if the migration is re-run.
+  SELECT EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = 'runs' AND n.nspname = 'public'
+  ) INTO has_runs;
+
+  IF has_runs THEN
+    FOR r IN
+      SELECT con.conname, con.conrelid::regclass::text AS tbl
+      FROM pg_constraint con
+      WHERE con.contype = 'f'
+        AND con.confrelid = 'runs'::regclass
+    LOOP
+      EXECUTE format('ALTER TABLE %s DROP CONSTRAINT IF EXISTS %I', r.tbl, r.conname);
+    END LOOP;
+  END IF;
 END $$;
 
 -- ============================================================
@@ -47,17 +57,24 @@ END $$;
 --    session_messages(id) can be added without orphan rows.
 -- ============================================================
 
-UPDATE webhook_deliveries SET run_id = NULL, suppressed_by_run_id = NULL;
-
-ALTER TABLE webhook_deliveries RENAME COLUMN run_id TO message_id;
-ALTER TABLE webhook_deliveries RENAME COLUMN suppressed_by_run_id TO suppressed_by_message_id;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'webhook_deliveries' AND column_name = 'run_id'
+  ) THEN
+    UPDATE webhook_deliveries SET run_id = NULL, suppressed_by_run_id = NULL;
+    ALTER TABLE webhook_deliveries RENAME COLUMN run_id TO message_id;
+    ALTER TABLE webhook_deliveries RENAME COLUMN suppressed_by_run_id TO suppressed_by_message_id;
+  END IF;
+END $$;
 
 -- ============================================================
 -- 3. Drop the legacy tables (no CASCADE — every FK was handled above).
 -- ============================================================
 
-DROP TABLE runs;
-DROP TABLE sessions;
+DROP TABLE IF EXISTS runs;
+DROP TABLE IF EXISTS sessions;
 
 -- ============================================================
 -- 4. Create the new `sessions` table.
@@ -74,7 +91,7 @@ DROP TABLE sessions;
 --     A2A sessions that opt into reuse.
 -- ============================================================
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id          UUID NOT NULL,
   agent_id           UUID NOT NULL,
@@ -107,7 +124,7 @@ CREATE TABLE sessions (
 -- All billing-grade and audit fields live here at the message grain.
 -- ============================================================
 
-CREATE TABLE session_messages (
+CREATE TABLE IF NOT EXISTS session_messages (
   id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id               UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   tenant_id                UUID NOT NULL,
@@ -150,44 +167,44 @@ CREATE TABLE session_messages (
 -- ============================================================
 
 -- Sessions: tenant-scoped queries
-CREATE INDEX idx_sessions_tenant_status
+CREATE INDEX IF NOT EXISTS idx_sessions_tenant_status
   ON sessions (tenant_id, status);
 
-CREATE INDEX idx_sessions_tenant_agent_created
+CREATE INDEX IF NOT EXISTS idx_sessions_tenant_agent_created
   ON sessions (tenant_id, agent_id, created_at DESC);
 
 -- Cleanup cron: scan for sessions past their hard expiry across all states.
-CREATE INDEX idx_sessions_tenant_status_expires
+CREATE INDEX IF NOT EXISTS idx_sessions_tenant_status_expires
   ON sessions (tenant_id, status, expires_at);
 
 -- Cleanup cron: idle-TTL check via idle_since
-CREATE INDEX idx_sessions_idle
+CREATE INDEX IF NOT EXISTS idx_sessions_idle
   ON sessions (status, idle_since)
   WHERE status = 'idle';
 
 -- A2A multi-turn-via-contextId reuse lookup. Predicate mirrors migration 027
 -- exactly: only one non-stopped session may hold a given (tenant, agent, ctx).
-CREATE UNIQUE INDEX idx_sessions_context_id_active
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_context_id_active
   ON sessions (tenant_id, agent_id, context_id)
   WHERE status NOT IN ('stopped') AND context_id IS NOT NULL;
 
 -- session_messages: tenant-scoped lists, per-session message lists, status
-CREATE INDEX idx_session_messages_tenant_created
+CREATE INDEX IF NOT EXISTS idx_session_messages_tenant_created
   ON session_messages (tenant_id, created_at DESC);
 
-CREATE INDEX idx_session_messages_session_created
+CREATE INDEX IF NOT EXISTS idx_session_messages_session_created
   ON session_messages (session_id, created_at);
 
-CREATE INDEX idx_session_messages_tenant_status
+CREATE INDEX IF NOT EXISTS idx_session_messages_tenant_status
   ON session_messages (tenant_id, status);
 
 -- Active-message check (in-session concurrency 409): partial index keeps it cheap.
-CREATE INDEX idx_session_messages_active
+CREATE INDEX IF NOT EXISTS idx_session_messages_active
   ON session_messages (session_id)
   WHERE status IN ('queued', 'running');
 
 -- Budget aggregation covering index (mirrors legacy idx_runs_tenant_monthly_cost)
-CREATE INDEX idx_session_messages_tenant_monthly_cost
+CREATE INDEX IF NOT EXISTS idx_session_messages_tenant_monthly_cost
   ON session_messages (tenant_id, created_at) INCLUDE (cost_usd);
 
 -- ============================================================
@@ -201,6 +218,7 @@ CREATE INDEX idx_session_messages_tenant_monthly_cost
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sessions FORCE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_isolation ON sessions;
 CREATE POLICY tenant_isolation ON sessions
   FOR ALL TO app_user
   USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
@@ -209,6 +227,7 @@ CREATE POLICY tenant_isolation ON sessions
 ALTER TABLE session_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_messages FORCE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_isolation ON session_messages;
 CREATE POLICY tenant_isolation ON session_messages
   FOR ALL TO app_user
   USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
@@ -218,6 +237,7 @@ CREATE POLICY tenant_isolation ON session_messages
 -- 8. Triggers
 -- ============================================================
 
+DROP TRIGGER IF EXISTS sessions_updated_at ON sessions;
 CREATE TRIGGER sessions_updated_at
   BEFORE UPDATE ON sessions
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -235,11 +255,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON session_messages TO app_user;
 -- ============================================================
 
 ALTER TABLE webhook_deliveries
+  DROP CONSTRAINT IF EXISTS webhook_deliveries_message_id_fkey;
+ALTER TABLE webhook_deliveries
   ADD CONSTRAINT webhook_deliveries_message_id_fkey
   FOREIGN KEY (message_id)
   REFERENCES session_messages(id)
   ON DELETE SET NULL;
 
+ALTER TABLE webhook_deliveries
+  DROP CONSTRAINT IF EXISTS webhook_deliveries_suppressed_by_message_id_fkey;
 ALTER TABLE webhook_deliveries
   ADD CONSTRAINT webhook_deliveries_suppressed_by_message_id_fkey
   FOREIGN KEY (suppressed_by_message_id)

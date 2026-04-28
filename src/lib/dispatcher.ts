@@ -78,6 +78,21 @@ const PUBLIC_TRIGGERS: ReadonlySet<RunTriggeredBy> = new Set([
   "chat",
 ]);
 
+/**
+ * FIX #9 (partial): per-session AbortControllers used to signal in-flight
+ * sandbox boots that the session has been cancelled. ensureSandbox /
+ * createSessionSandbox in @/lib/sandbox does not yet accept a signal — that
+ * change is too risky for an automated pass — so this map currently provides
+ * the wiring for cancelSession to surface intent. A follow-up should plumb
+ * the signal into the sandbox SDK call chain (TODO below).
+ *
+ * TODO(fix-9): plumb `signal: bootController.signal` through
+ * `createSessionSandbox` / `reconnectSessionSandbox` so the in-flight Vercel
+ * Sandbox provisioning can be aborted cleanly. Until then, cancel during
+ * `creating` still falls back to the 5-min creating-watchdog.
+ */
+const sessionBootAborts = new Map<string, AbortController>();
+
 export interface DispatchInput {
   tenantId: TenantId;
   agentId: AgentId;
@@ -138,13 +153,20 @@ interface PreparedExecution {
  */
 export async function dispatchSessionMessage(input: DispatchInput): Promise<DispatchResult> {
   // 1. Idempotency short-circuit (process-memory store).
-  if (input.idempotencyKey) {
-    const cached = getIdempotentResponse(input.idempotencyKey) as
+  // SEC: cache key MUST be tenant-namespaced. Otherwise Tenant A's idempotency
+  // key collides with Tenant B's identical key, leaking message ids/sessionIds
+  // across tenants. Mirrors the A2A pattern in the JSON-RPC route.
+  const idempCacheKey = input.idempotencyKey
+    ? `dispatch:${input.tenantId}:${input.idempotencyKey}`
+    : null;
+  if (idempCacheKey) {
+    const cached = getIdempotentResponse(idempCacheKey) as
       | { sessionId: string; messageId: string }
       | null;
     if (cached) {
       logger.info("Dispatcher idempotency hit", {
         idempotency_key: input.idempotencyKey,
+        tenant_id: input.tenantId,
         session_id: cached.sessionId,
         message_id: cached.messageId,
       });
@@ -167,15 +189,21 @@ export async function dispatchSessionMessage(input: DispatchInput): Promise<Disp
   //    row, and stamp budget reserve — all inside one tenant-scoped tx.
   const prepared = await reserveSessionAndMessage(input);
 
-  // 3. Outside the tx: ensure sandbox, build MCP, spawn runner.
-  const stream = await runMessageStream(input, prepared);
-
-  if (input.idempotencyKey) {
-    setIdempotentResponse(input.idempotencyKey, {
+  // FIX #10 (adv-008): write the idempotency cache entry BEFORE spawning the
+  // sandbox/runner. The transactional reservation is already committed by
+  // reserveSessionAndMessage, so the {sessionId, messageId} pair is durable;
+  // we just need to make the in-memory mapping available before any async
+  // work that could be retried. (A future revision should persist this in DB
+  // — note: in-memory is per-process and lost on restart.)
+  if (idempCacheKey) {
+    setIdempotentResponse(idempCacheKey, {
       sessionId: prepared.session.id,
       messageId: prepared.messageId,
     });
   }
+
+  // 3. Outside the tx: ensure sandbox, build MCP, spawn runner.
+  const stream = await runMessageStream(input, prepared);
 
   return {
     sessionId: prepared.session.id,
@@ -198,6 +226,17 @@ export async function dispatchSessionMessage(input: DispatchInput): Promise<Disp
 export async function cancelSession(sessionId: string, tenantId: TenantId): Promise<Session> {
   const session = await getSession(sessionId, tenantId);
   if (session.status === "stopped") return session;
+
+  // FIX #9 (partial): if a sandbox boot is in flight for this session, fire
+  // its abort signal. The sandbox SDK call doesn't yet honor the signal
+  // (TODO above), but cancelSession also CASes to stopped below — when the
+  // boot completes the dispatcher's casCreatingToActive will see stopped
+  // and shut the sandbox down on its own.
+  const ctrl = sessionBootAborts.get(sessionId);
+  if (ctrl) {
+    try { ctrl.abort(); } catch { /* ignore */ }
+    sessionBootAborts.delete(sessionId);
+  }
 
   // Mark any in-flight message cancelled (best-effort — message may already
   // have terminated naturally between our read and write).
@@ -238,6 +277,16 @@ export async function cancelSession(sessionId: string, tenantId: TenantId): Prom
 
 async function reserveSessionAndMessage(input: DispatchInput): Promise<PreparedExecution> {
   return withTenantTransaction(input.tenantId, async (tx) => {
+    // FIX #3 (adv-001): TOCTOU-safe concurrency cap. Acquire a tx-scoped
+    // advisory lock keyed on tenant_id BEFORE any session count / insert.
+    // Two concurrent dispatches for the same tenant are serialized at this
+    // line; the lock auto-releases on commit/rollback. The previous
+    // INSERT...WHERE (SELECT COUNT) pattern is not safe under READ COMMITTED.
+    await tx.execute(
+      `SELECT pg_advisory_xact_lock(hashtext('session_cap:' || $1::text))`,
+      [input.tenantId],
+    );
+
     // Load agent + budget once. Composio MCP cache fields live on the
     // internal row and the dispatcher needs them for buildMcpConfig.
     const agent = await tx.queryOne(
@@ -413,6 +462,12 @@ async function runMessageStream(
 
   let sandbox: SessionSandboxInstance;
 
+  // FIX #9: register a per-session AbortController so cancelSession can
+  // signal in-flight sandbox boots. Cleaned up after sandbox is up (or on
+  // throw). Plumbing into the sandbox SDK is the TODO above.
+  const bootController = new AbortController();
+  sessionBootAborts.set(session.id, bootController);
+
   if (session.sandbox_id) {
     // Reconnect path: race reconnect against MCP/plugin fetch.
     const auth = await authPromise;
@@ -484,7 +539,10 @@ async function runMessageStream(
     });
   }
 
-  // Sandbox is up; flip session creating→active if it was creating.
+  // Sandbox is up; we no longer need the boot abort controller for this session.
+  sessionBootAborts.delete(session.id);
+
+  // Flip session creating→active if it was creating.
   if (session.status === "creating") {
     const promoted = await casCreatingToActive(session.id, input.tenantId, { sandbox_id: sandbox.id });
     if (!promoted) {
@@ -493,6 +551,12 @@ async function runMessageStream(
       await sandbox.stop().catch(() => {});
       throw new SessionStoppedError("Session was stopped during sandbox boot");
     }
+  }
+
+  // If the cancel signal fired during boot, drop the sandbox and bail.
+  if (bootController.signal.aborted) {
+    await sandbox.stop().catch(() => {});
+    throw new SessionStoppedError("Session boot aborted by cancelSession");
   }
 
   // Mint the per-message bearer token bound to this messageId.

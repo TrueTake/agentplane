@@ -59,6 +59,14 @@ export async function createSession(
   },
 ): Promise<{ session: Session; agent: AgentInternal; remainingBudget: number }> {
   return withTenantTransaction(tenantId, async (tx) => {
+    // FIX #3 (adv-001): TOCTOU-safe concurrency cap via tx-scoped advisory
+    // lock keyed on tenant_id. Plain INSERT...WHERE (SELECT COUNT) is not
+    // serializable under READ COMMITTED. The lock auto-releases on commit.
+    await tx.execute(
+      `SELECT pg_advisory_xact_lock(hashtext('session_cap:' || $1::text))`,
+      [tenantId],
+    );
+
     const agent = await tx.queryOne(
       AgentRowInternal,
       "SELECT * FROM agents WHERE id = $1 AND tenant_id = $2",
@@ -280,6 +288,46 @@ export async function casCreatingToActive(
 }
 
 /**
+ * Atomic CAS active → idle, gated on the message being the most recent
+ * message on the session AND already in a terminal status. Used by the
+ * internal transcript-upload endpoint when the dispatcher stream detached at
+ * 4.5min for a PERSISTENT session (ephemeral=false): finalize is skipped on
+ * the dispatcher side, leaving the session stuck in 'active' until the 30min
+ * watchdog. This helper unsticks it without racing the (rare) live
+ * dispatcher path.
+ *
+ * FIX #2: detached persistent sessions previously sat in 'active' for 30min.
+ * Subsequent message dispatches returned 409 ConcurrencyLimit until the
+ * watchdog fired.
+ *
+ * Returns true when the CAS fired; false when the session was no longer
+ * active OR the supplied messageId was not the latest.
+ */
+export async function casActiveToIdle(
+  sessionId: string,
+  tenantId: TenantId,
+  messageId: string,
+): Promise<boolean> {
+  const result = await execute(
+    `UPDATE sessions
+     SET status = 'idle', idle_since = NOW()
+     WHERE id = $1 AND tenant_id = $2 AND status = 'active'
+       AND EXISTS (
+         SELECT 1
+         FROM session_messages m
+         WHERE m.id = $3 AND m.session_id = $1 AND m.tenant_id = $2
+           AND m.status NOT IN ('queued', 'running')
+           AND m.created_at = (
+             SELECT MAX(created_at) FROM session_messages
+             WHERE session_id = $1 AND tenant_id = $2
+           )
+       )`,
+    [sessionId, tenantId, messageId],
+  );
+  return result.rowCount > 0;
+}
+
+/**
  * Atomic CAS to stopped from any non-stopped state. Used by cancel + cleanup
  * cron. Idempotent: returns the row regardless of whether the transition
  * actually fired.
@@ -428,4 +476,51 @@ export async function updateSessionMcpRefreshedAt(
     "UPDATE sessions SET mcp_refreshed_at = now() WHERE id = $1 AND tenant_id = $2",
     [sessionId, tenantId],
   );
+}
+
+/**
+ * Look up the most recent non-stopped session for (tenant, agent) whose most
+ * recent message was triggered by `schedule`. Used by the scheduled-runs
+ * dispatcher to reuse a warm sandbox across cron ticks (within the per-row
+ * idle TTL).
+ *
+ * Returns the session row when an idle (or active) reusable candidate is
+ * available; otherwise null and the caller creates a fresh session.
+ *
+ * FIX #6 (adv-003): without this lookup, every schedule tick spun up a new
+ * sandbox even though `defaultIdleTtlSeconds('schedule') === 300` is meant
+ * for follow-up reuse.
+ *
+ * Note: caller still passes the candidate sessionId into the dispatcher,
+ * which races with the cleanup cron via CAS. Internal triggers fall back
+ * to creating a new session if the candidate flipped to stopped.
+ */
+export async function findWarmScheduleSession(
+  tenantId: TenantId,
+  agentId: AgentId,
+): Promise<Session | null> {
+  // Most-recent-non-stopped session for (tenant, agent). We additionally
+  // require that the latest message on that session was triggered_by=schedule
+  // — otherwise we'd reuse a chat/playground session unintentionally.
+  const result = await queryOne(
+    SessionRow,
+    `SELECT s.*
+     FROM sessions s
+     WHERE s.tenant_id = $1
+       AND s.agent_id = $2
+       AND s.status IN ('idle', 'active', 'creating')
+       AND EXISTS (
+         SELECT 1
+         FROM session_messages m
+         WHERE m.session_id = s.id
+           AND m.tenant_id = $1
+           AND m.triggered_by = 'schedule'
+         ORDER BY m.created_at DESC
+         LIMIT 1
+       )
+     ORDER BY s.updated_at DESC
+     LIMIT 1`,
+    [tenantId, agentId],
+  );
+  return result ?? null;
 }

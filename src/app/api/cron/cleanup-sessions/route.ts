@@ -58,6 +58,29 @@ async function forceStop(sessionId: string): Promise<string | null> {
 }
 
 /**
+ * CAS variant of forceStop that ONLY transitions sessions in
+ * `creating` / `idle` to `stopped`. Used by the expires_at sweep so we never
+ * yank an `active` session out from under a streaming runner mid-message.
+ *
+ * FIX #5 (adv-004): the legacy expires_at sweep called forceStop()
+ * unconditionally, killing active sessions and provoking a 409 race in the
+ * runner's transcript upload (the runner then writes a synthetic timeout over
+ * the freshly-finalized message). Active sessions that are genuinely stuck
+ * are now caught by the active-watchdog (30 min) below.
+ */
+async function casExpiredStop(sessionId: string): Promise<string | null> {
+  const result = await query(
+    z.object({ sandbox_id: z.string().nullable() }),
+    `UPDATE sessions
+     SET status = 'stopped', sandbox_id = NULL, idle_since = NULL
+     WHERE id = $1 AND status IN ('creating', 'idle')
+     RETURNING sandbox_id`,
+    [sessionId],
+  );
+  return result[0]?.sandbox_id ?? null;
+}
+
+/**
  * Mark the in-flight `running` message for a session as a watchdog terminal
  * status. Used by both creating-timeout and active-timeout watchdogs.
  */
@@ -103,19 +126,35 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   let activeWatchdog = 0;
   let orphansCleaned = 0;
 
-  // 1. Expires_at sweep — stop sandboxes for any session past expires_at,
-  //    regardless of state. Bounds the contextId-reuse warm-sandbox attack
-  //    surface (4h wall-clock cap from creation).
+  // 1. Expires_at sweep — stop sandboxes for sessions past expires_at, but
+  //    ONLY when the current state is `creating` or `idle`.
+  //
+  //    FIX #5 (adv-004): we deliberately do NOT touch `active` sessions here.
+  //    Killing an active session mid-stream caused the runner's transcript
+  //    upload to 409 and overwrite the just-finalized message with a
+  //    synthetic timeout. Genuinely stuck active sessions are caught by the
+  //    active-watchdog (30 min) at step 4.
   const expired = await getExpiredSessions();
   for (const session of expired) {
     try {
-      const previousSandboxId = await forceStop(session.id);
+      if (session.status === "active") {
+        // Skip — let the active-watchdog or natural finalize handle it.
+        continue;
+      }
+      const previousSandboxId = await casExpiredStop(session.id);
+      if (previousSandboxId === null) {
+        // Lost race: state changed (e.g. idle → active or creating → active)
+        // between our SELECT and UPDATE. Skip this tick.
+        continue;
+      }
       if (previousSandboxId) {
         await stopSandboxBestEffort(previousSandboxId, {
           session_id: session.id,
           reason: "expired",
         });
       }
+      // Mark any in-flight queued/running message terminal. For creating/idle
+      // states this is rare but defends against a final-millisecond race.
       await markInFlightMessage(
         session.id,
         "timed_out",

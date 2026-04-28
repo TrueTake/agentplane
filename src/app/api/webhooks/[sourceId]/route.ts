@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { execute } from "@/db";
+import { execute, queryOne } from "@/db";
+import { z } from "zod";
 import { logger } from "@/lib/logger";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { dispatchSessionMessage } from "@/lib/dispatcher";
@@ -8,6 +9,11 @@ import { getCallbackBaseUrl } from "@/lib/mcp-connections";
 import { authenticateApiKey } from "@/lib/auth";
 import { withErrorHandler, jsonResponse } from "@/lib/api";
 import { NotFoundError, ConcurrencyLimitError, BudgetExceededError } from "@/lib/errors";
+import { AgentRowInternal } from "@/lib/validation";
+import { checkTenantBudget } from "@/lib/session-messages";
+import { withTenantTransaction } from "@/db";
+import { MAX_CONCURRENT_SESSIONS } from "@/lib/sessions";
+import { supportsClaudeRunner } from "@/lib/models";
 import {
   UpdateWebhookSourceSchema,
   attachDeliveryMessage,
@@ -377,6 +383,76 @@ export async function POST(
   const tenantId = source.tenant_id as TenantId;
   const agentId = source.agent_id as AgentId;
   const sourceWebhookId = source.id as WebhookSourceId;
+
+  // FIX #7: pre-flight cap + budget check. The previous comment promised this
+  // but the code did not implement it — concurrency / budget errors thrown
+  // inside `after()` were swallowed and the caller got 202. Distinguish:
+  //   - 503 concurrency_exceeded   (with Retry-After: 60)
+  //   - 503 budget_exceeded
+  //   - 500 internal_error         (anything else)
+  // Non-mutating count (no FOR UPDATE / advisory lock); the dispatcher's
+  // transactional check is still authoritative.
+  try {
+    const countRow = await queryOne(
+      z.object({ count: z.coerce.number() }),
+      `SELECT COUNT(*)::int AS count
+       FROM sessions
+       WHERE tenant_id = $1 AND status IN ('creating', 'active')`,
+      [tenantId],
+    );
+    if (countRow && countRow.count >= MAX_CONCURRENT_SESSIONS) {
+      await markDeliveryError(initialDelivery.deliveryRowId, "rate_limited").catch(() => {});
+      return NextResponse.json(
+        {
+          error: {
+            code: "concurrency_exceeded",
+            message: `Tenant has ${countRow.count} active sessions (cap ${MAX_CONCURRENT_SESSIONS})`,
+          },
+        },
+        { status: 503, headers: { "Retry-After": "60" } },
+      );
+    }
+  } catch (err) {
+    logger.warn("webhook pre-flight concurrency check failed (non-fatal)", {
+      source_id: source.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // Pre-flight budget check. Loads the agent (needed for subscription detection)
+  // and runs the same checkTenantBudget logic the dispatcher uses inside its tx.
+  try {
+    const agent = await queryOne(
+      AgentRowInternal,
+      "SELECT * FROM agents WHERE id = $1 AND tenant_id = $2",
+      [agentId, tenantId],
+    );
+    if (!agent) {
+      await markDeliveryError(initialDelivery.deliveryRowId, "internal_error").catch(() => {});
+      return NextResponse.json(
+        { error: { code: "internal_error", message: "Agent not found" } },
+        { status: 500 },
+      );
+    }
+    const isSubscriptionRun = supportsClaudeRunner(agent.model);
+    await withTenantTransaction(tenantId, async (tx) => {
+      await checkTenantBudget(tx, tenantId, { isSubscriptionRun });
+    });
+  } catch (err) {
+    if (err instanceof BudgetExceededError) {
+      await markDeliveryError(initialDelivery.deliveryRowId, "internal_error").catch(() => {});
+      return NextResponse.json(
+        {
+          error: { code: "budget_exceeded", message: err.message },
+        },
+        { status: 503, headers: { "Retry-After": "300" } },
+      );
+    }
+    logger.warn("webhook pre-flight budget check failed (non-fatal)", {
+      source_id: source.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   const prompt = buildPromptFromTemplate(source.prompt_template, payload, { name: source.name });
 
