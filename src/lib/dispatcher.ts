@@ -647,19 +647,12 @@ async function runMessageStream(
       // (Drop stale entries proactively so we never pick them up later.)
       if (cachedHandle) activeSessions.delete(session.id);
 
-      // OPT #2 — disk-reconnect branch. When `mcpFresh` is true, the sandbox
-      // we're about to reconnect to was injected with MCP config on the prior
-      // message and that config is still within the freshness window. Skip
-      // the rebuild + updateMcpConfig in that case. Otherwise we did rebuild
-      // (mcpPromise is the real buildMcpConfig) and inject fresh tokens.
-      const skipMcpRefreshOnReconnect = mcpFresh;
-      if (skipMcpRefreshOnReconnect) {
-        logger.info("dispatcher: mcp refresh skipped", {
-          session_id: session.id,
-          tenant_id: input.tenantId,
-          reason: "reconnect_fresh",
-        });
-      }
+      // Disk-reconnect branch always rebuilds MCP. `reconnectSessionSandbox`
+      // constructs a fresh SessionSandboxInstance wrapper on every call —
+      // MCP config lives on the wrapper, not on the underlying Vercel Sandbox,
+      // so a previous-message wrapper's state does not survive the new wrap.
+      // (The warm-cache hit branch above CAN skip the rebuild because it
+      // reuses the same wrapper instance.)
       // Reconnect path: race reconnect against MCP/plugin fetch.
       const auth = await authPromise;
       const [reconnectResult, mcpResult, pluginResult] = await Promise.all([
@@ -676,15 +669,12 @@ async function runMessageStream(
           maxIdleTimeoutMs: DEFAULT_SESSION_TIMEOUT_MS,
           callbackData: input.callbackData,
         }),
-        // When skipping MCP rebuild on reconnect, hand reconnectSessionSandbox
-        // an empty result so it doesn't re-inject. We also have to override
-        // mcpPromise here so we never await the (already-suppressed) build.
-        skipMcpRefreshOnReconnect ? Promise.resolve(EMPTY_MCP) : mcpPromise,
+        mcpPromise,
         pluginPromise,
       ]);
 
       if (reconnectResult) {
-        if (!skipMcpRefreshOnReconnect && Object.keys(mcpResult.servers).length > 0) {
+        if (Object.keys(mcpResult.servers).length > 0) {
           reconnectResult.updateMcpConfig(mcpResult.servers, mcpResult.errors);
         }
         const idleSinceMs = session.idle_since
@@ -693,10 +683,7 @@ async function runMessageStream(
         if (idleSinceMs > 5 * 60 * 1000) {
           await reconnectResult.extendTimeout(DEFAULT_SESSION_TIMEOUT_MS);
         }
-        // OPT #2 — only stamp mcp_refreshed_at when we actually refreshed.
-        if (!skipMcpRefreshOnReconnect) {
-          recordMcpRefresh(session.id, input.tenantId);
-        }
+        recordMcpRefresh(session.id, input.tenantId);
         sandbox = reconnectResult;
         // Cache the warm handle so subsequent same-isolate messages hit fast.
         cacheSandboxHandle(session.id, sandbox);
