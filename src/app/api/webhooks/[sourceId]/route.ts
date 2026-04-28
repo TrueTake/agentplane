@@ -2,15 +2,15 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { execute } from "@/db";
 import { logger } from "@/lib/logger";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { createRun, transitionRunStatus } from "@/lib/runs";
-import { executeRunInBackground } from "@/lib/run-executor";
+import { dispatchSessionMessage } from "@/lib/dispatcher";
+import { transitionMessageStatus } from "@/lib/session-messages";
 import { getCallbackBaseUrl } from "@/lib/mcp-connections";
 import { authenticateApiKey } from "@/lib/auth";
 import { withErrorHandler, jsonResponse } from "@/lib/api";
 import { NotFoundError, ConcurrencyLimitError, BudgetExceededError } from "@/lib/errors";
 import {
   UpdateWebhookSourceSchema,
-  attachDeliveryRun,
+  attachDeliveryMessage,
   buildPromptFromTemplate,
   deleteWebhookSource,
   findRecentDeliveryByDedupeKey,
@@ -28,15 +28,14 @@ import { computeDedupeKey } from "@/lib/webhook-dedupe";
 import { describeMismatchReason, evaluateFilter } from "@/lib/webhook-filter";
 import type {
   AgentId,
-  RunId,
   TenantId,
   WebhookSourceId,
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-// 5 min cap matches /api/runs and /api/cron/scheduled-runs. The POST replies
-// 202 in milliseconds, but `after()` runs `executeRunInBackground` inline and
-// is bound by this maxDuration — a lower cap kills the agent mid-run.
+// 5 min cap matches sessions endpoints and /api/cron/scheduled-runs. The POST
+// replies 202 in milliseconds, but `after()` consumes the dispatcher stream
+// inline and is bound by this maxDuration — a lower cap kills the agent mid-run.
 export const maxDuration = 300;
 
 const MAX_BODY_BYTES = 512 * 1024;
@@ -229,7 +228,7 @@ export async function POST(
       payloadHash,
       valid: false,
       error: verifyResult.error,
-      runId: null,
+      messageId: null,
     });
     return genericUnauthorized();
   }
@@ -245,7 +244,7 @@ export async function POST(
       payloadHash,
       valid: false,
       error: "invalid_json",
-      runId: null,
+      messageId: null,
     });
     return NextResponse.json(
       { error: { code: "invalid_json", message: "Body is not valid JSON" } },
@@ -282,16 +281,18 @@ export async function POST(
     payloadHash,
     valid: true,
     error: null,
-    runId: null,
+    messageId: null,
     dedupeKey: dedupeContext.key,
   });
 
   if (initialDelivery.kind === "duplicate") {
     return NextResponse.json(
       {
-        run_id: initialDelivery.existingRunId,
+        message_id: initialDelivery.existingMessageId,
         duplicate: true,
-        status_url: initialDelivery.existingRunId ? `/api/runs/${initialDelivery.existingRunId}` : null,
+        status_url: initialDelivery.existingMessageId
+          ? `/api/sessions/_/messages/${initialDelivery.existingMessageId}`
+          : null,
       },
       { status: 200 },
     );
@@ -310,20 +311,22 @@ export async function POST(
       if (match) {
         await markDeliverySuppressed(
           initialDelivery.deliveryRowId,
-          match.runId,
+          match.messageId,
         ).catch(() => {});
         logger.info("webhook_dedupe_suppressed", {
           source_id: source.id,
           provider: dedupeContext.provider,
           dedupe_key: dedupeContext.key.slice(0, 80),
-          matched_run_id: match.runId,
+          matched_message_id: match.messageId,
           window_seconds: dedupeContext.rule.windowSeconds,
         });
         return NextResponse.json(
           {
-            run_id: match.runId,
+            message_id: match.messageId,
             duplicate: true,
-            status_url: match.runId ? `/api/runs/${match.runId}` : null,
+            status_url: match.messageId
+              ? `/api/sessions/_/messages/${match.messageId}`
+              : null,
           },
           { status: 200 },
         );
@@ -336,11 +339,11 @@ export async function POST(
     }
   }
 
-  // Content filter: runs after dedupe, before createRun. The evaluator owns
+  // Content filter: runs after dedupe, before dispatch. The evaluator owns
   // try/catch end-to-end — it returns either {matched: true} or
   // {matched: false, failingCondition?, error?}. Mismatch (including
   // evaluator errors) marks the delivery filtered + audited and short-circuits
-  // with a 200 response. No createRun, no after().
+  // with a 200 response. No dispatch, no after().
   const filterEval = evaluateFilter(source.filter_rules, payload);
   if (!filterEval.matched) {
     const reason = describeMismatchReason(filterEval);
@@ -358,7 +361,7 @@ export async function POST(
     }
     return NextResponse.json(
       {
-        run_id: null,
+        message_id: null,
         accepted: false,
         filtered: true,
         status_url: null,
@@ -367,70 +370,90 @@ export async function POST(
     );
   }
 
+  // U4: pre-flight concurrency rejection. The dispatcher itself enforces the
+  // tenant cap atomically inside its transaction, but if it's already saturated
+  // we want to surface a 503 to the caller (so they retry) rather than 202'ing
+  // and silently failing in `after()`.
+  const tenantId = source.tenant_id as TenantId;
+  const agentId = source.agent_id as AgentId;
+  const sourceWebhookId = source.id as WebhookSourceId;
+
   const prompt = buildPromptFromTemplate(source.prompt_template, payload, { name: source.name });
 
-  // Respond 202 immediately, then create the run in the background. Linear
-  // (and most webhook senders) retry if we don't 2xx within ~5 seconds.
-  // createRun touches the DB, runs concurrency + budget checks, and starts
-  // sandbox prep — too slow for the inline path. Idempotency is preserved by
-  // the recordDelivery row above: a retry with the same delivery_id hits the
+  // Respond 202 immediately, then dispatch in the background. Webhook senders
+  // (Linear, GitHub, …) retry if we don't 2xx within ~5 seconds. The dispatcher
+  // touches the DB, runs concurrency + budget checks, and starts sandbox prep
+  // — too slow for the inline path. Idempotency is preserved by the
+  // recordDelivery row above: a retry with the same delivery_id hits the
   // duplicate branch and returns the original response shape.
   after(async () => {
-    let runId: RunId | null = null;
+    let messageId: string | null = null;
+    let tenantIdForFinalize: TenantId | null = null;
     try {
-      const created = await createRun(
-        source.tenant_id as TenantId,
-        source.agent_id as AgentId,
+      const dispatchResult = await dispatchSessionMessage({
+        tenantId,
+        agentId,
         prompt,
-        {
-          triggeredBy: "webhook",
-          webhookSourceId: source.id as WebhookSourceId,
-        },
-      );
-      runId = created.run.id as RunId;
+        triggeredBy: "webhook",
+        ephemeral: true,
+        callerKeyId: null,
+        webhookSourceId: sourceWebhookId,
+        platformApiUrl: getCallbackBaseUrl(),
+      });
+      messageId = dispatchResult.messageId;
+      tenantIdForFinalize = tenantId;
+
       await Promise.all([
-        attachDeliveryRun(initialDelivery.deliveryRowId, runId),
-        touchSourceLastTriggered(source.id as WebhookSourceId),
+        attachDeliveryMessage(initialDelivery.deliveryRowId, messageId),
+        touchSourceLastTriggered(sourceWebhookId),
       ]).catch((err) => {
-        logger.warn("webhook post-create attach failed", {
+        logger.warn("webhook post-dispatch attach failed", {
           source_id: source.id,
-          run_id: runId,
+          message_id: messageId,
           error: err instanceof Error ? err.message : String(err),
         });
       });
 
-      // createRun only inserts the row in `pending` state. Without an executor
-      // the run sits there forever and the cleanup cron eventually marks it
-      // `timed_out` / `orphaned_sandbox`. Execute inline so the agent actually
-      // runs against the webhook payload.
-      const effectiveBudget = Math.min(created.agent.max_budget_usd, created.remainingBudget);
-      await executeRunInBackground({
-        agent: created.agent,
-        tenantId: source.tenant_id as TenantId,
-        runId,
-        prompt,
-        platformApiUrl: getCallbackBaseUrl(),
-        effectiveBudget,
-        effectiveMaxTurns: created.agent.max_turns,
-        maxRuntimeSeconds: created.agent.max_runtime_seconds,
-      });
+      // Drain the dispatcher stream so the message actually executes — the
+      // dispatcher returns a ReadableStream that produces work as it's
+      // consumed, and finalize hooks fire in the stream's natural-close path.
+      // We don't relay events anywhere (webhook is fire-and-forget), so just
+      // pull bytes until EOF. The 5-min `maxDuration` bounds this.
+      const reader = dispatchResult.stream.getReader();
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+      } finally {
+        try { reader.releaseLock(); } catch { /* ignore */ }
+      }
     } catch (err) {
       let code: DeliveryError = "internal_error";
       if (err instanceof ConcurrencyLimitError) code = "rate_limited";
       else if (err instanceof BudgetExceededError) code = "internal_error";
       await markDeliveryError(initialDelivery.deliveryRowId, code).catch(() => {});
-      // If the run was created but execution threw, transition it to failed
-      // so it doesn't sit in `pending` until the cleanup cron times it out.
-      if (runId) {
-        await transitionRunStatus(runId, source.tenant_id as TenantId, "pending", "failed", {
-          completed_at: new Date().toISOString(),
-          result_summary: "Webhook execution failed",
-        }).catch(() => {});
+      // If the message was created but execution threw, transition it to
+      // failed so it doesn't sit in `running` until the cleanup cron times it
+      // out.
+      if (messageId && tenantIdForFinalize) {
+        await transitionMessageStatus(
+          messageId,
+          tenantIdForFinalize,
+          "running",
+          "failed",
+          {
+            completed_at: new Date().toISOString(),
+            error_type: "webhook_execution_error",
+            error_messages: [err instanceof Error ? err.message : String(err)],
+          },
+        ).catch(() => {});
       }
-      logger.warn("webhook run creation failed (background)", {
+      logger.warn("webhook dispatch failed (background)", {
         source_id: source.id,
         delivery_id: deliveryId,
-        run_id: runId,
+        message_id: messageId,
         error: err instanceof Error ? err.message : String(err),
       });
     }

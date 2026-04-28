@@ -6,7 +6,6 @@ import { getEnv } from "./env";
 import { FilterRulesSchema, type FilterRules } from "./validation";
 import type {
   AgentId,
-  RunId,
   TenantId,
   WebhookSourceId,
 } from "./types";
@@ -90,9 +89,9 @@ export const WebhookDeliveryRow = z.object({
   payload_hash: z.string(),
   valid: z.boolean(),
   error: z.string().nullable(),
-  run_id: z.string().nullable(),
+  message_id: z.string().nullable(),
   dedupe_key: z.string().nullable(),
-  suppressed_by_run_id: z.string().nullable(),
+  suppressed_by_message_id: z.string().nullable(),
   filtered: z.boolean(),
   filtered_reason: z.string().nullable(),
   created_at: z.coerce.date(),
@@ -201,14 +200,14 @@ export interface RecordDeliveryParams {
   payloadHash: string;
   valid: boolean;
   error: DeliveryError | null;
-  runId: RunId | null;
+  messageId: string | null;
   /** Content-projection key for window-based dedupe. Null when no rule applies. */
   dedupeKey?: string | null;
 }
 
 export type RecordDeliveryResult =
   | { kind: "inserted"; deliveryRowId: string }
-  | { kind: "duplicate"; existingRunId: RunId | null };
+  | { kind: "duplicate"; existingMessageId: string | null };
 
 export async function recordDelivery(
   params: RecordDeliveryParams,
@@ -216,7 +215,7 @@ export async function recordDelivery(
   const inserted = await query(
     z.object({ id: z.string() }),
     `INSERT INTO webhook_deliveries
-       (tenant_id, source_id, delivery_id, payload_hash, valid, error, run_id, dedupe_key)
+       (tenant_id, source_id, delivery_id, payload_hash, valid, error, message_id, dedupe_key)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (source_id, delivery_id) DO NOTHING
      RETURNING id`,
@@ -227,7 +226,7 @@ export async function recordDelivery(
       params.payloadHash,
       params.valid,
       params.error,
-      params.runId,
+      params.messageId,
       params.dedupeKey ?? null,
     ],
   );
@@ -237,15 +236,15 @@ export async function recordDelivery(
   }
 
   const existing = await queryOne(
-    z.object({ run_id: z.string().nullable() }),
-    `SELECT run_id
+    z.object({ message_id: z.string().nullable() }),
+    `SELECT message_id
      FROM webhook_deliveries
      WHERE source_id = $1 AND delivery_id = $2`,
     [params.sourceId, params.deliveryId],
   );
   return {
     kind: "duplicate",
-    existingRunId: (existing?.run_id ?? null) as RunId | null,
+    existingMessageId: existing?.message_id ?? null,
   };
 }
 
@@ -255,22 +254,22 @@ export async function recordDelivery(
  * Excludes a specific `excludeDeliveryRowId` so the just-inserted delivery
  * doesn't match itself.
  *
- * Only deliveries with `valid = true` and a non-null `run_id` count as a
+ * Only deliveries with `valid = true` and a non-null `message_id` count as a
  * suppression target — we don't want to point a sender at an invalid prior
- * delivery, and we want to point them at the run that absorbed the work.
+ * delivery, and we want to point them at the message that absorbed the work.
  */
 export async function findRecentDeliveryByDedupeKey(
   sourceId: WebhookSourceId,
   dedupeKey: string,
   windowSeconds: number,
   excludeDeliveryRowId: string,
-): Promise<{ id: string; runId: RunId | null } | null> {
+): Promise<{ id: string; messageId: string | null } | null> {
   const row = await queryOne(
     z.object({
       id: z.string(),
-      run_id: z.string().nullable(),
+      message_id: z.string().nullable(),
     }),
-    `SELECT id, run_id
+    `SELECT id, message_id
      FROM webhook_deliveries
      WHERE source_id = $1
        AND dedupe_key = $2
@@ -282,18 +281,18 @@ export async function findRecentDeliveryByDedupeKey(
     [sourceId, dedupeKey, excludeDeliveryRowId, windowSeconds],
   );
   if (!row) return null;
-  return { id: row.id, runId: (row.run_id ?? null) as RunId | null };
+  return { id: row.id, messageId: row.message_id ?? null };
 }
 
 export async function markDeliverySuppressed(
   deliveryRowId: string,
-  suppressedByRunId: RunId | null,
+  suppressedByMessageId: string | null,
 ): Promise<void> {
   await execute(
     `UPDATE webhook_deliveries
-     SET suppressed_by_run_id = $1
+     SET suppressed_by_message_id = $1
      WHERE id = $2`,
-    [suppressedByRunId, deliveryRowId],
+    [suppressedByMessageId, deliveryRowId],
   );
 }
 
@@ -309,13 +308,13 @@ export async function markDeliveryFiltered(
   );
 }
 
-export async function attachDeliveryRun(
+export async function attachDeliveryMessage(
   deliveryRowId: string,
-  runId: RunId,
+  messageId: string,
 ): Promise<void> {
   await execute(
-    `UPDATE webhook_deliveries SET run_id = $1 WHERE id = $2`,
-    [runId, deliveryRowId],
+    `UPDATE webhook_deliveries SET message_id = $1 WHERE id = $2`,
+    [messageId, deliveryRowId],
   );
 }
 
@@ -397,7 +396,7 @@ export interface CreateWebhookSourceParams {
   /** Caller-supplied signing secret. When omitted, the backend generates one. */
   secret?: string;
   enabled?: boolean;
-  /** Optional payload filter applied after content-dedupe, before createRun. */
+  /** Optional payload filter applied after content-dedupe, before dispatch. */
   filterRules?: FilterRules | null;
 }
 
