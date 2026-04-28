@@ -356,16 +356,38 @@ export async function getIdleSessions(): Promise<Session[]> {
 }
 
 /**
- * Watchdog: sessions stuck in `creating` (sandbox-boot timed out) for
- * >5 minutes, or `active` (runner crashed mid-message) for >30 minutes.
- * No RLS — used by cleanup cron.
+ * Watchdog: sessions stuck in a single non-terminal state past `maxMinutes`.
+ * `creating` watchdog should pass 5 (sandbox-boot timed out); `active`
+ * watchdog should pass 30 (runner crashed mid-message). Threshold reference:
+ * `creating` uses `created_at` (boot started then), `active` uses
+ * `updated_at` (last status touch). No RLS — used by cleanup cron.
  */
-export async function getStuckSessions(): Promise<Session[]> {
+export async function getStuckSessions(
+  state: "creating" | "active",
+  maxMinutes: number,
+): Promise<Session[]> {
+  const tsCol = state === "creating" ? "created_at" : "updated_at";
   return query(
     SessionRow,
     `SELECT * FROM sessions
-     WHERE (status = 'creating' AND created_at < NOW() - INTERVAL '5 minutes')
-        OR (status = 'active' AND updated_at < NOW() - INTERVAL '30 minutes')`,
+     WHERE status = $1
+       AND ${tsCol} < NOW() - INTERVAL '1 minute' * $2`,
+    [state, maxMinutes],
+  );
+}
+
+/**
+ * Find sandbox_ids referenced by terminal (`stopped`) sessions — defense in
+ * depth for the orphan-sandbox sweep. With the unified schema, sandboxes are
+ * tracked exclusively via `sessions.sandbox_id`; a non-null sandbox_id on a
+ * stopped session indicates a finalize/stop call that didn't clean the row.
+ * No RLS — used by cleanup cron.
+ */
+export async function getOrphanedSandboxSessions(): Promise<Session[]> {
+  return query(
+    SessionRow,
+    `SELECT * FROM sessions
+     WHERE status = 'stopped' AND sandbox_id IS NOT NULL`,
     [],
   );
 }
