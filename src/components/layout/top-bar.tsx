@@ -10,7 +10,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/admin/agents": "Agents",
   "/admin/mcp-servers": "Custom Connectors",
   "/admin/plugin-marketplaces": "Plugins",
-  "/admin/sessions": "Sessions",
+  "/admin/sessions": "Runs",
   "/admin/tenants": "Tenants",
   "/admin/settings": "Settings",
 };

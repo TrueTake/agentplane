@@ -61,33 +61,16 @@ export function SessionsListClient({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  function setSort(next: "created_at" | "latest_activity" | "total_cost") {
+  const setSort = (next: "created_at" | "latest_activity" | "total_cost") => {
     const params = new URLSearchParams(searchParams.toString());
     if (next === "created_at") params.delete("sort");
     else params.set("sort", next);
     params.delete("page");
     const qs = params.toString();
     router.push(`/admin/sessions${qs ? `?${qs}` : ""}`);
-  }
+  };
 
-  function arrow(key: typeof sort) {
-    return sort === key ? " ↓" : "";
-  }
-
-  function SortHeader({ label, sortKey, align }: { label: string; sortKey: typeof sort; align?: "right" }) {
-    return (
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => setSort(sortKey)}
-        className={`h-auto px-0 py-0 text-xs font-semibold uppercase tracking-wide hover:bg-transparent hover:underline ${align === "right" ? "ml-auto" : ""}`}
-      >
-        {label}
-        {arrow(sortKey)}
-      </Button>
-    );
-  }
+  const arrow = (key: typeof sort) => (sort === key ? " ↓" : "");
 
   return (
     <div className="space-y-3">
@@ -115,13 +98,37 @@ export function SessionsListClient({
             <Th>Latest Trigger</Th>
             <Th align="right">Messages</Th>
             <Th align="right">
-              <SortHeader label="Cost" sortKey="total_cost" align="right" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSort("total_cost")}
+                className="ml-auto h-auto px-0 py-0 text-xs font-semibold uppercase tracking-wide hover:bg-transparent hover:underline"
+              >
+                Cost{arrow("total_cost")}
+              </Button>
             </Th>
             <Th>
-              <SortHeader label="Latest Activity" sortKey="latest_activity" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSort("latest_activity")}
+                className="h-auto px-0 py-0 text-xs font-semibold uppercase tracking-wide hover:bg-transparent hover:underline"
+              >
+                Latest Activity{arrow("latest_activity")}
+              </Button>
             </Th>
             <Th>
-              <SortHeader label="Created" sortKey="created_at" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSort("created_at")}
+                className="h-auto px-0 py-0 text-xs font-semibold uppercase tracking-wide hover:bg-transparent hover:underline"
+              >
+                Created{arrow("created_at")}
+              </Button>
             </Th>
           </AdminTableHead>
           <tbody>

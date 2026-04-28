@@ -119,7 +119,7 @@ src/
       (dashboard)/
         page.tsx          # dashboard overview (stat cards + executions/cost charts)
         run-charts.tsx    # Recharts line charts (executions/day, cost/day per agent — sourced from session_messages)
-        agents/           # agent list + tabbed detail (General, Identity, Connectors, Skills, Plugins, Schedules, Sessions)
+        agents/           # agent list + tabbed detail (General, Identity, Connectors, Skills, Plugins, Schedules, Runs)
         mcp-servers/      # custom MCP server management
         plugin-marketplaces/  # marketplace list + detail + plugin editor (tabbed: Agents, Skills, Connectors)
         sessions/         # session list + detail (per-message accordion, transcript viewer, cancel button, source filter, live streaming)
@@ -183,13 +183,18 @@ src/
       company-switcher.tsx   # tenant/company dropdown selector
       top-bar.tsx            # breadcrumb navigation bar
     ui/                   # shared UI primitives (badge, button, card, dialog, confirm-dialog, form-field, tabs, etc.)
+      button.tsx             # CVA-styled button (variants: default/destructive/destructive-outline/outline/secondary/ghost/link; sizes: default/sm/lg/icon/icon-xs/icon-sm/icon-lg; supports asChild via Radix Slot)
       copy-button.tsx        # clipboard copy button with checkmark feedback
       message-source-badge.tsx  # color-coded badge for message trigger source (API, Schedule, Playground, Chat, A2A, Webhook)
-      detail-page-header.tsx # standardized detail page header
-      section-header.tsx     # consistent section headers
+      detail-page-header.tsx # standardized detail page header (title, description, eyebrow, actions slot)
+      section-header.tsx     # consistent section headers (title + optional description + actions slot)
       confirm-dialog.tsx     # managed confirmation dialog (replaces browser confirm())
       form-field.tsx         # form field wrapper with label + error display
       tabs.tsx               # line-style tabs matching AgentCo design
+      empty.tsx              # empty-state primitive (Empty/EmptyHeader/EmptyMedia/EmptyTitle/EmptyDescription/EmptyContent)
+      icon-container.tsx     # rounded muted square wrapper for icons (sizes: sm/default/lg; tones: muted/accent/primary/destructive/outline)
+      spinner.tsx            # CSS spinner (sizes: sm/default/lg)
+      tooltip.tsx            # CSS-only group-hover tooltip (sides: top/right/bottom/left)
       theme-toggle.tsx       # dark mode toggle
   middleware.ts           # auth middleware (API key, JWT cookie, OAuth callback bypass)
 scripts/
@@ -327,15 +332,16 @@ All routes (except `/api/health`) require `Authorization: Bearer <api_key>`. Adm
 - `a2aHeaders()` helper shared between JSON-RPC and Agent Card routes for consistent `A2A-Version` + `A2A-Request-Id` headers
 - Admin UI terminology: "tenant" is renamed to "company" throughout the UI (API still uses "tenant")
 - Admin UI navigation: top bar with breadcrumb (serves as page title, no redundant h1), company switcher dropdown, all pages scoped to active company
-- Admin UI agent detail: tabbed interface (General, Identity, Connectors, Skills, Plugins, Schedules, Sessions) with line-style tabs; metrics cards under General tab
+- Admin UI agent detail: tabbed interface (General, Identity, Connectors, Skills, Plugins, Schedules, Runs) with line-style tabs; metrics cards under General tab
 - Admin UI Identity tab: FileTreeEditor with all 8 SoulSpec files (SOUL.md, IDENTITY.md, STYLE.md, AGENTS.md, HEARTBEAT.md, USER_TEMPLATE.md, examples/); action buttons: Generate Soul, Import, Export, Publish; validation warnings inline
 - Admin UI settings page (`/admin/settings`): company form (name, slug, timezone, budget, logo upload), API keys section, ClawSouls Registry section (API token), danger zone
 - SoulSpec v0.5 identity: strict compliance — required SOUL.md sections (Personality, Tone, Principles), IDENTITY.md fields (Name, Role, Creature, Emoji, Vibe, Avatar); progressive disclosure (Level 1 = summary, Level 2 = 4 files, Level 3 = all); `identity` JSONB auto-derived on save; `.soul/` directory injected into sandbox
 - ClawSouls registry integration: import/export/publish/validate via REST API (`https://clawsouls.ai/api/v1`); tenant-scoped API token (encrypted); `soul-manifest.ts` shared helper; A2A metadata versioned (`soulspec:identity:v2` + backward-compat `soulspec:identity`)
 - "Generate Soul" uses AI Gateway to draft all 8 SoulSpec files from agent config (name, description, tools, skills); falls back to claude-sonnet if agent model fails
 - Admin UI: A2A badge on agent list, A2A info section on agent detail (endpoint URLs + Agent Card preview), source filter on the sessions/messages list
-- Admin UI sessions list: shows agent, session status (with `stopped (ephemeral)` folded into the badge), `message_count`, total cost (sum across messages), latest activity, latest trigger. Sortable on created_at / latest activity / total cost. Filterable by agent, status, trigger.
-- Admin UI session detail: scrollable accordion of `session_messages` rows (auto-expanded most recent), each rendering the message-source badge + start time + status + transcript via `TranscriptViewer`. Cancel button visible only on `creating`/`active`/`idle`. Live streaming subscribes to `/api/sessions/:id/stream` (resolves to in-flight message); idle sessions don't subscribe.
+- Admin UI runs list (under `/admin/sessions` route — UI label is "Runs"): shows agent, run status (with `stopped (ephemeral)` folded into the badge), `message_count`, total cost (sum across messages), latest activity, latest trigger. Sortable on created_at / latest activity / total cost. Filterable by agent, status, trigger.
+- Admin UI run detail: scrollable accordion of `session_messages` rows (auto-expanded most recent), each rendering the message-source badge + start time + status + transcript via `TranscriptViewer`. Cancel button ("Stop Run") visible only on `creating`/`active`/`idle`. Live streaming subscribes to `/api/sessions/:id/stream` (resolves to in-flight message); idle sessions don't subscribe.
+- Admin UI terminology: the data model uses "Session" (table `sessions`, route `/admin/sessions`, type `SessionRow`, etc.). The user-facing UI uses "Run" — sidebar label, breadcrumb, table column headers, dashboard metric cards, and the "Stop Run" button. Keep this split: never rename the data model, always rename the copy.
 - Admin UI dashboard charts: cost/day per agent and executions/day per agent ("execution" = one `session_messages` row, disambiguated from chat/A2A messages), aggregated from `session_messages` by `date_trunc('day', completed_at)`
 - Admin UI model selector: cmdk + Radix Popover combobox fetching live models from Vercel AI Gateway; shows context window, pricing, capability tags; supports search, provider filter, custom model entry
 - Admin UI edit form: two rows — Name/Desc/Model/Runner on top, Max Turns/Budget/Runtime/Permission Mode on bottom; form disabled during save; API errors displayed inline

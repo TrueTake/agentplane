@@ -68,11 +68,11 @@ export default async function AdminDashboardPage() {
           {stats?.agent_count ?? 0}
         </MetricCard>
         <Link href="/admin/sessions" className="block">
-          <MetricCard label="Total Sessions" className="hover:bg-muted/30 transition-colors cursor-pointer h-full">
+          <MetricCard label="Total Runs" className="hover:bg-muted/30 transition-colors cursor-pointer h-full">
             {stats?.total_sessions ?? 0}
           </MetricCard>
         </Link>
-        <MetricCard label="Active Sessions">
+        <MetricCard label="Active Runs">
           <span className="text-green-500">{stats?.active_sessions ?? 0}</span>
         </MetricCard>
         <MetricCard label="Total Spend">

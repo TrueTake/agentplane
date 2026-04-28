@@ -37,7 +37,7 @@ export function CancelSessionButton({
       setOpen(false);
       router.refresh();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to stop session");
+      alert(err instanceof Error ? err.message : "Failed to stop run");
     } finally {
       setCancelling(false);
     }
@@ -51,13 +51,13 @@ export function CancelSessionButton({
         onClick={() => setOpen(true)}
         disabled={cancelling}
       >
-        {cancelling ? "Stopping..." : "Stop Session"}
+        {cancelling ? "Stopping..." : "Stop Run"}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Stop this session?</DialogTitle>
+            <DialogTitle>Stop this run?</DialogTitle>
             <DialogDescription>
               This will cancel the in-flight message (if any) and terminate the sandbox immediately.
             </DialogDescription>
@@ -68,7 +68,7 @@ export function CancelSessionButton({
               Cancel
             </Button>
             <Button variant="destructive" size="sm" onClick={handleConfirm} disabled={cancelling}>
-              {cancelling ? "Stopping…" : "Stop Session"}
+              {cancelling ? "Stopping…" : "Stop Run"}
             </Button>
           </DialogFooter>
         </DialogContent>

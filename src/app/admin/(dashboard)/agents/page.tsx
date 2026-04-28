@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { AdminTable, AdminTableHead, AdminTableRow, Th, EmptyRow } from "@/components/ui/admin-table";
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { query } from "@/db";
 import { z } from "zod";
 import { AddAgentForm } from "./add-agent-form";
@@ -33,9 +35,13 @@ export default async function AgentsPage() {
 
   if (!tenantId) {
     return (
-      <div className="text-muted-foreground text-sm py-12 text-center">
-        Select a company from the sidebar.
-      </div>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon"><Building2 /></EmptyMedia>
+          <EmptyTitle>No company selected</EmptyTitle>
+          <EmptyDescription>Pick a company from the switcher in the sidebar to manage its agents.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 

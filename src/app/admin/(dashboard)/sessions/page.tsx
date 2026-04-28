@@ -1,5 +1,7 @@
 import { Suspense } from "react";
+import { Building2 } from "lucide-react";
 import { PaginationBar, parsePaginationParams } from "@/components/ui/pagination-bar";
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { SourceFilter } from "./source-filter";
 import { StatusFilter } from "./status-filter";
 import { SessionsListClient } from "./sessions-list-client";
@@ -46,9 +48,13 @@ export default async function SessionsPage({
   const tenantId = (await getActiveTenantId()) ?? null;
   if (!tenantId) {
     return (
-      <div className="text-muted-foreground text-sm py-12 text-center">
-        Select a company from the sidebar.
-      </div>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon"><Building2 /></EmptyMedia>
+          <EmptyTitle>No company selected</EmptyTitle>
+          <EmptyDescription>Pick a company from the switcher in the sidebar to view its runs.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 

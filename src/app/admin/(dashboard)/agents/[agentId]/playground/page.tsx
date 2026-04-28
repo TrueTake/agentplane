@@ -373,7 +373,7 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
         )}
         {sessionId && (
           <span className="text-xs text-muted-foreground font-mono">
-            Session: {sessionId.slice(0, 12)}…
+            Run: {sessionId.slice(0, 12)}…
           </span>
         )}
         {sessionId && !running && events.some((ev) => ev.type === "result") && (
@@ -381,7 +381,7 @@ export default function PlaygroundPage({ params }: { params: Promise<{ agentId: 
             href={`/admin/sessions/${sessionId}`}
             className="text-xs text-primary hover:underline"
           >
-            View session →
+            View run →
           </Link>
         )}
       </div>

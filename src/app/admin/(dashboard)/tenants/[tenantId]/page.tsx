@@ -135,7 +135,7 @@ export default async function TenantDetailPage({
           />
         }>
           <AdminTableHead>
-            <Th>Session</Th>
+            <Th>Run</Th>
             <Th>Agent</Th>
             <Th>Status</Th>
             <Th>Prompt</Th>

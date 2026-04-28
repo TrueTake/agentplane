@@ -37,7 +37,7 @@ export async function AgentRuns({ agentId }: { agentId: string }) {
   return (
     <AdminTable>
       <AdminTableHead>
-        <Th>Session</Th>
+        <Th>Run</Th>
         <Th>Status</Th>
         <Th>Trigger</Th>
         <Th className="max-w-xs">Prompt</Th>

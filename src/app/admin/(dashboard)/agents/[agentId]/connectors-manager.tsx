@@ -525,14 +525,17 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
                     )}
                     <span className="text-sm font-medium truncate flex-1">{c.server_name}</span>
                     <Badge variant="outline" className="text-xs flex-shrink-0">{c.server_slug}</Badge>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       onClick={() => setConfirmMcpDisconnect(c)}
-                      className="text-muted-foreground hover:text-destructive flex-shrink-0 ml-1 text-base leading-none"
+                      className="ml-1 text-base leading-none text-muted-foreground hover:text-destructive"
+                      aria-label="Disconnect"
                       title="Disconnect"
                     >
                       ×
-                    </button>
+                    </Button>
                   </div>
 
                   {c.status === "active" ? (
@@ -544,15 +547,17 @@ export function ConnectorsManager({ agentId, toolkits: initialToolkits, composio
                   )}
 
                   {c.status === "active" && (
-                    <button
+                    <Button
                       type="button"
-                      className="text-xs text-primary hover:underline text-left"
+                      variant="link"
+                      size="sm"
+                      className="h-auto justify-start p-0 text-xs"
                       onClick={() => setMcpToolsModal(c)}
                     >
                       {c.allowed_tools.length > 0
                         ? `${c.allowed_tools.length} tools selected`
                         : "All tools (no filter)"}
-                    </button>
+                    </Button>
                   )}
 
                   {(c.status === "expired" || c.status === "failed") && (
@@ -791,14 +796,17 @@ function ComposioConnectorCard(props: CardProps) {
         <Badge variant="outline" className="text-xs flex-shrink-0">
           {c.primaryScheme}
         </Badge>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           onClick={props.onRemove}
-          className="text-muted-foreground hover:text-destructive flex-shrink-0 ml-1 text-base leading-none"
+          className="ml-1 text-base leading-none text-muted-foreground hover:text-destructive"
+          aria-label="Remove connector"
           title="Remove connector"
         >
           ×
-        </button>
+        </Button>
       </div>
 
       {isNoAuth ? (
@@ -825,9 +833,11 @@ function ComposioConnectorCard(props: CardProps) {
       )}
 
       {isActive && (c.captureDeferred || !c.botUserId) && (
-        <button
+        <Button
           type="button"
-          className="text-xs text-primary hover:underline text-left"
+          variant="link"
+          size="sm"
+          className="h-auto justify-start p-0 text-xs"
           disabled={props.recapturing}
           onClick={() => props.onRecapture(c.slug)}
         >
@@ -836,7 +846,7 @@ function ComposioConnectorCard(props: CardProps) {
             : c.botUserId
               ? "Re-capture identity"
               : "Capture identity"}
-        </button>
+        </Button>
       )}
 
       {(() => {
@@ -846,13 +856,15 @@ function ComposioConnectorCard(props: CardProps) {
         const filtered = props.allowedTools.filter((t) => t.startsWith(prefix));
         const hasFilter = filtered.length > 0;
         return (
-          <button
+          <Button
             type="button"
-            className="text-xs text-primary hover:underline text-left"
+            variant="link"
+            size="sm"
+            className="h-auto justify-start p-0 text-xs"
             onClick={props.onShowTools}
           >
             {hasFilter ? `${filtered.length} / ${total} tools` : `All tools (${total})`}
-          </button>
+          </Button>
         );
       })()}
 
@@ -933,14 +945,17 @@ function ComposioConnectorCard(props: CardProps) {
                 >
                   Open authorize URL ↗
                 </a>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => navigator.clipboard?.writeText(props.byoaAuthorizeUrl)}
-                  className="text-[10px] text-muted-foreground hover:text-foreground px-1"
+                  className="h-auto px-1 py-0 text-[10px] text-muted-foreground hover:bg-transparent hover:text-foreground"
+                  aria-label="Copy authorize URL"
                   title="Copy authorize URL"
                 >
                   copy
-                </button>
+                </Button>
               </div>
               <p className="text-[10px] text-muted-foreground leading-snug">
                 Open the authorize URL in your browser to complete the connection. This page will update automatically once the authorization completes.
