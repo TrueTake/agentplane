@@ -167,18 +167,33 @@ export function TranscriptViewer({ transcript, prompt, isStreaming = false }: { 
   const userHasScrolledUpRef = useRef(false);
   const [, setUserHasScrolledUp] = useState(false);
 
-  const handleScroll = useCallback(() => {
+  const checkScrollPosition = useCallback(() => {
+    // The transcript container has no height constraint, so the window is
+    // usually the actual scroller. Check both: stay sticky only when both
+    // the window and (if scrollable) the container are at the bottom.
+    const threshold = 50;
+
+    const doc = document.documentElement;
+    const windowScrollable = doc.scrollHeight > window.innerHeight + 1;
+    const windowAtBottom = !windowScrollable
+      || window.innerHeight + window.scrollY >= doc.scrollHeight - threshold;
+
+    let containerAtBottom = true;
     const el = scrollContainerRef.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    if (atBottom) {
-      userHasScrolledUpRef.current = false;
-      setUserHasScrolledUp(false);
-    } else {
-      userHasScrolledUpRef.current = true;
-      setUserHasScrolledUp(true);
+    if (el && el.scrollHeight > el.clientHeight + 1) {
+      containerAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     }
+
+    const atBottom = windowAtBottom && containerAtBottom;
+    userHasScrolledUpRef.current = !atBottom;
+    setUserHasScrolledUp(!atBottom);
   }, []);
+
+  useEffect(() => {
+    if (!isStreaming) return;
+    window.addEventListener("scroll", checkScrollPosition, { passive: true });
+    return () => window.removeEventListener("scroll", checkScrollPosition);
+  }, [isStreaming, checkScrollPosition]);
 
   useEffect(() => {
     if (isStreaming && !userHasScrolledUpRef.current) {
@@ -194,7 +209,7 @@ export function TranscriptViewer({ transcript, prompt, isStreaming = false }: { 
       <CardContent className="p-0">
         <div
           ref={scrollContainerRef}
-          onScroll={isStreaming ? handleScroll : undefined}
+          onScroll={isStreaming ? checkScrollPosition : undefined}
           className="space-y-3 overflow-y-auto px-6 pb-6"
         >
           {prompt && (
