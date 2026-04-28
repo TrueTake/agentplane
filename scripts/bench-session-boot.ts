@@ -22,6 +22,19 @@
  *              forces a new session with sandbox restore from blob if your
  *              tenant has cached state. Falls back to cold on failure.
  *
+ *              CAVEAT: this scenario does NOT actually exercise the archived
+ *              restore path against production. `cancel` transitions the
+ *              session to `stopped`, after which the second message creates
+ *              a fresh session — equivalent to a `cold` measurement, not a
+ *              true archived restore. A real archived test would need to kill
+ *              the sandbox while keeping the session row alive (no public
+ *              endpoint exposes that today). Measuring archived restore
+ *              latency requires DB-level intervention (e.g. `UPDATE sessions
+ *              SET sandbox_id = NULL WHERE id = ...` between primer and
+ *              second message). Until that test harness exists, the archived
+ *              numbers reported here should be treated as a cold-path
+ *              control, not as evidence of archived-restore performance.
+ *
  * The harness measures four wall-clock timings per iteration:
  *   t_first_byte           — ms from POST send to the first response byte.
  *   t_first_event          — ms to the first NDJSON event whose type field

@@ -69,7 +69,12 @@ import {
 import type { TenantId, AgentId, RunTriggeredBy, WebhookSourceId } from "@/lib/types";
 
 const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const MCP_REFRESH_TTL_MS = 30 * 60 * 1000;
+// OPT #2 — tighten the MCP-fresh window from 30min to 5min so individual
+// short-lived OAuth tokens can't expire silently inside the warm-cache skip
+// path. The warm-cache hit branch (below) uses this gate to skip both the
+// `buildMcpConfig` round-trip AND the `updateMcpConfig` injection — relying
+// on the previously-injected MCP config the sandbox already has on disk.
+const MCP_REFRESH_TTL_MS = 5 * 60 * 1000;
 
 const EMPTY_PLUGINS: PluginFileSet = { skillFiles: [], agentFiles: [], warnings: [] };
 
@@ -549,17 +554,52 @@ async function runMessageStream(
   // Spawn sandbox + builds in parallel (hot path — same shape as legacy
   // session-executor.prepareSessionSandbox).
   const effectiveRunner = resolveEffectiveRunner(agent.model, agent.runner);
-  const skipPluginRefresh = !!session.sandbox_id && isMcpFresh(session);
+  const mcpFresh = isMcpFresh(session);
+  const skipPluginRefresh = !!session.sandbox_id && mcpFresh;
+  // OPT #2 — when the session is warm AND inside the MCP_REFRESH_TTL_MS (5min)
+  // window we skip `buildMcpConfig` entirely on the warm-cache hit branch and
+  // on the disk-reconnect branch. The cache-miss/cold paths still rebuild.
+  // We compute `cachedHandleHit` upfront so we know whether the warm-cache
+  // branch is going to be taken (it depends on session.sandbox_id matching the
+  // cached entry's id and freshness; the eligibility check is duplicated below
+  // and stays the source of truth).
+  const cachedHandle = session.sandbox_id ? activeSessions.get(session.id) : undefined;
+  const cachedHandleHit =
+    !!cachedHandle &&
+    Date.now() - cachedHandle.lastTouchedMs < SANDBOX_HANDLE_FRESHNESS_MS &&
+    cachedHandle.instance.id === session.sandbox_id;
+  const skipMcpBuild = !!session.sandbox_id && mcpFresh && cachedHandleHit;
+  if (skipMcpBuild) {
+    logger.info("dispatcher: mcp refresh skipped", {
+      session_id: session.id,
+      tenant_id: input.tenantId,
+      reason: "warm_cache_fresh",
+    });
+  }
   // buildMcpConfig touches RLS-protected tables (agents UPDATE, mcp_connections
   // SELECT) — must run inside a tenant-scoped transaction so app.current_tenant_id
   // is set. Otherwise the agent UPDATE silently writes 0 rows and Composio MCP
   // never wires up.
-  const mcpPromise = withTenantTransaction(input.tenantId, () =>
-    buildMcpConfig(agent, input.tenantId),
-  );
-  const pluginPromise = skipPluginRefresh
+  const EMPTY_MCP: McpBuildResult = { servers: {}, errors: [] };
+  const mcpPromise: Promise<McpBuildResult> = skipMcpBuild
+    ? Promise.resolve(EMPTY_MCP)
+    : withTenantTransaction(input.tenantId, () => buildMcpConfig(agent, input.tenantId));
+  // OPT #3 — kick off plugin fetch as early as possible so its latency overlaps
+  // with whatever sandbox-provisioning work follows. `fetchPluginContent([])`
+  // is a no-op fast path inside @/lib/plugins, so the empty-plugins case stays
+  // cheap. Timing log lets us verify the overlap in production logs.
+  const pluginFetchStart = Date.now();
+  const pluginPromise: Promise<PluginFileSet> = skipPluginRefresh
     ? Promise.resolve(EMPTY_PLUGINS)
-    : fetchPluginContent(agent.plugins ?? []);
+    : fetchPluginContent(agent.plugins ?? []).then((result) => {
+        logger.info("dispatcher: plugin fetch complete", {
+          session_id: session.id,
+          tenant_id: input.tenantId,
+          duration_ms: Date.now() - pluginFetchStart,
+          plugin_count: agent.plugins?.length ?? 0,
+        });
+        return result;
+      });
   const authPromise = resolveSandboxAuth(input.tenantId, effectiveRunner);
 
   let sandbox: SessionSandboxInstance;
@@ -572,14 +612,10 @@ async function runMessageStream(
 
   if (session.sandbox_id) {
     // OPTIMIZATION A — hot-path cache check. Same-isolate back-to-back
-    // messages skip the `Sandbox.get()` RPC entirely. We still need to wire
-    // fresh MCP servers (tokens may have rotated since the last touch).
-    const cachedHandle = activeSessions.get(session.id);
-    if (
-      cachedHandle &&
-      Date.now() - cachedHandle.lastTouchedMs < SANDBOX_HANDLE_FRESHNESS_MS &&
-      cachedHandle.instance.id === session.sandbox_id
-    ) {
+    // messages skip the `Sandbox.get()` RPC entirely. The eligibility booleans
+    // were precomputed above (`cachedHandle`, `cachedHandleHit`) so the MCP
+    // build promise already knows whether to short-circuit.
+    if (cachedHandleHit && cachedHandle) {
       const [mcpResult, pluginResult, auth] = await Promise.all([
         mcpPromise,
         pluginPromise,
@@ -591,20 +627,39 @@ async function runMessageStream(
       void pluginResult;
       void auth;
 
-      if (Object.keys(mcpResult.servers).length > 0) {
-        cachedHandle.instance.updateMcpConfig(mcpResult.servers, mcpResult.errors);
+      // OPT #2 — when `skipMcpBuild` was true, mcpResult is the EMPTY_MCP
+      // sentinel and the sandbox already holds the previously-injected MCP
+      // config. Skip both `updateMcpConfig` AND `recordMcpRefresh` so we don't
+      // bump the session's mcp_refreshed_at on a non-refresh.
+      if (!skipMcpBuild) {
+        if (Object.keys(mcpResult.servers).length > 0) {
+          cachedHandle.instance.updateMcpConfig(mcpResult.servers, mcpResult.errors);
+        }
+        recordMcpRefresh(session.id, input.tenantId);
       }
       cachedHandle.lastTouchedMs = Date.now();
       // Re-insert to push to LRU tail.
       activeSessions.delete(session.id);
       activeSessions.set(session.id, cachedHandle);
-      recordMcpRefresh(session.id, input.tenantId);
       sandbox = cachedHandle.instance;
     } else {
       // Cache miss / stale entry — fall through to DB-backed reconnect.
       // (Drop stale entries proactively so we never pick them up later.)
       if (cachedHandle) activeSessions.delete(session.id);
 
+      // OPT #2 — disk-reconnect branch. When `mcpFresh` is true, the sandbox
+      // we're about to reconnect to was injected with MCP config on the prior
+      // message and that config is still within the freshness window. Skip
+      // the rebuild + updateMcpConfig in that case. Otherwise we did rebuild
+      // (mcpPromise is the real buildMcpConfig) and inject fresh tokens.
+      const skipMcpRefreshOnReconnect = mcpFresh;
+      if (skipMcpRefreshOnReconnect) {
+        logger.info("dispatcher: mcp refresh skipped", {
+          session_id: session.id,
+          tenant_id: input.tenantId,
+          reason: "reconnect_fresh",
+        });
+      }
       // Reconnect path: race reconnect against MCP/plugin fetch.
       const auth = await authPromise;
       const [reconnectResult, mcpResult, pluginResult] = await Promise.all([
@@ -621,12 +676,15 @@ async function runMessageStream(
           maxIdleTimeoutMs: DEFAULT_SESSION_TIMEOUT_MS,
           callbackData: input.callbackData,
         }),
-        mcpPromise,
+        // When skipping MCP rebuild on reconnect, hand reconnectSessionSandbox
+        // an empty result so it doesn't re-inject. We also have to override
+        // mcpPromise here so we never await the (already-suppressed) build.
+        skipMcpRefreshOnReconnect ? Promise.resolve(EMPTY_MCP) : mcpPromise,
         pluginPromise,
       ]);
 
       if (reconnectResult) {
-        if (Object.keys(mcpResult.servers).length > 0) {
+        if (!skipMcpRefreshOnReconnect && Object.keys(mcpResult.servers).length > 0) {
           reconnectResult.updateMcpConfig(mcpResult.servers, mcpResult.errors);
         }
         const idleSinceMs = session.idle_since
@@ -635,7 +693,10 @@ async function runMessageStream(
         if (idleSinceMs > 5 * 60 * 1000) {
           await reconnectResult.extendTimeout(DEFAULT_SESSION_TIMEOUT_MS);
         }
-        recordMcpRefresh(session.id, input.tenantId);
+        // OPT #2 — only stamp mcp_refreshed_at when we actually refreshed.
+        if (!skipMcpRefreshOnReconnect) {
+          recordMcpRefresh(session.id, input.tenantId);
+        }
         sandbox = reconnectResult;
         // Cache the warm handle so subsequent same-isolate messages hit fast.
         cacheSandboxHandle(session.id, sandbox);
