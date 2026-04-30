@@ -8,6 +8,7 @@ import {
   getStuckSessions,
   getExpiredSessions,
   getOrphanedSandboxSessions,
+  getActiveSessionsWithoutRunningMessage,
   forceStopSession,
   casExpireToStopped,
   type Session,
@@ -24,6 +25,7 @@ export const dynamic = "force-dynamic";
 
 const CREATING_WATCHDOG_MINUTES = 5;
 const ACTIVE_WATCHDOG_MINUTES = 30;
+const ACTIVE_NO_RUNNING_MESSAGE_MINUTES = 5;
 const SANDBOX_STOP_CONCURRENCY = 5;
 
 /**
@@ -218,6 +220,36 @@ async function sweepActiveWatchdog(): Promise<number> {
   return countSweepResults(results, "Failed active-watchdog cleanup");
 }
 
+// Active-without-running-message sweep. Backstop for the schedule cron's
+// "stuck running → failed" fallback: when that fallback flips the only
+// message to `failed` but the session never transitions out of `active`, the
+// active-watchdog skips the row (its EXISTS clause requires a running
+// message). Without this sweep the row leaks until expires_at, and even then
+// `sweepExpired` skips active. Force-stop after a short window — by the time
+// no message is running, no more bytes are coming.
+async function sweepActiveWithoutRunning(): Promise<number> {
+  const orphans = await getActiveSessionsWithoutRunningMessage(
+    ACTIVE_NO_RUNNING_MESSAGE_MINUTES,
+  );
+  const results = await withConcurrency(orphans, SANDBOX_STOP_CONCURRENCY, async (session) => {
+    const previousSandboxId = await forceStopSession(session.id);
+    if (previousSandboxId) {
+      await stopSandboxBestEffort(previousSandboxId, {
+        session_id: session.id,
+        reason: "active_no_running_message",
+      });
+    }
+    await cleanupBlob(session);
+    logger.warn("Active-without-running-message sweep fired", {
+      session_id: session.id,
+      tenant_id: session.tenant_id,
+      updated_at: session.updated_at,
+    });
+    return true;
+  });
+  return countSweepResults(results, "Failed active-without-running-message cleanup");
+}
+
 // Orphan-sandbox sweep — terminal (`stopped`) sessions that still carry a
 // non-null `sandbox_id`. Defense-in-depth for finalize paths that wrote
 // `stopped` without clearing the column. FIX #23: only clear `sandbox_id`
@@ -257,21 +289,30 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     idleCleaned,
     creatingWatchdog,
     activeWatchdog,
+    activeNoRunning,
     orphansCleaned,
   ] = await Promise.all([
     sweepExpired(),
     sweepIdle(),
     sweepCreatingWatchdog(),
     sweepActiveWatchdog(),
+    sweepActiveWithoutRunning(),
     sweepOrphans(),
   ]);
 
-  const total = expiredCleaned + idleCleaned + creatingWatchdog + activeWatchdog + orphansCleaned;
+  const total =
+    expiredCleaned +
+    idleCleaned +
+    creatingWatchdog +
+    activeWatchdog +
+    activeNoRunning +
+    orphansCleaned;
   logger.info("Session cleanup completed", {
     expired_cleaned: expiredCleaned,
     idle_cleaned: idleCleaned,
     creating_watchdog: creatingWatchdog,
     active_watchdog: activeWatchdog,
+    active_no_running_message: activeNoRunning,
     orphans_cleaned: orphansCleaned,
     total,
   });
@@ -282,6 +323,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     idle: idleCleaned,
     creating_watchdog: creatingWatchdog,
     active_watchdog: activeWatchdog,
+    active_no_running_message: activeNoRunning,
     orphans: orphansCleaned,
   });
 });

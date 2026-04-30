@@ -26,6 +26,7 @@ export type CleanupReason =
   | "idle_ttl"
   | "creating_watchdog"
   | "active_watchdog"
+  | "active_no_running_message"
   | "orphan_sandbox";
 
 /** Error types written into session_messages.error_type by the cleanup cron. */
@@ -502,6 +503,35 @@ export async function getOrphanedSandboxSessions(): Promise<Session[]> {
      WHERE status = 'stopped' AND sandbox_id IS NOT NULL
      LIMIT 500`,
     [],
+  );
+}
+
+/**
+ * Defense in depth for the schedule cron's "stuck-running message → failed"
+ * fallback path: a session may sit in `active` while its only message is
+ * already in a terminal state. The active-watchdog (FIX #28) requires a
+ * `running` message and would skip these rows, so they would leak forever.
+ *
+ * Returns sessions in `active` for >`maxMinutes` whose latest message is NOT
+ * running. The `idle_since` filter excludes rows that just transitioned —
+ * this is purely a backstop for the schedule fallback path that doesn't get
+ * to call `casActiveToIdle` (best-effort there). No RLS — used by cleanup
+ * cron.
+ */
+export async function getActiveSessionsWithoutRunningMessage(
+  maxMinutes: number,
+): Promise<Session[]> {
+  return query(
+    SessionRow,
+    `SELECT s.* FROM sessions s
+     WHERE s.status = 'active'
+       AND s.updated_at < NOW() - INTERVAL '1 minute' * $1
+       AND NOT EXISTS (
+         SELECT 1 FROM session_messages m
+         WHERE m.session_id = s.id AND m.status = 'running'
+       )
+     LIMIT 500`,
+    [maxMinutes],
   );
 }
 

@@ -29,6 +29,7 @@ import {
   incrementMessageCount,
   getIdleSessions,
   getStuckSessions,
+  getActiveSessionsWithoutRunningMessage,
   updateSessionSandbox,
 } from "@/lib/sessions";
 import { execute, queryOne, query, withTenantTransaction } from "@/db";
@@ -280,6 +281,22 @@ describe("getStuckSessions", () => {
     expect(sql).toContain("session_messages");
     expect(sql).toContain("started_at");
     expect(params).toContain(30);
+  });
+});
+
+describe("getActiveSessionsWithoutRunningMessage", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("filters active sessions whose latest message is not running", async () => {
+    vi.mocked(query).mockResolvedValue([]);
+    await getActiveSessionsWithoutRunningMessage(5);
+    const sql = vi.mocked(query).mock.calls[0][1] as string;
+    const params = vi.mocked(query).mock.calls[0][2] as unknown[];
+    expect(sql).toContain("status = 'active'");
+    expect(sql).toContain("NOT EXISTS");
+    expect(sql).toContain("session_messages");
+    expect(sql).toContain("status = 'running'");
+    expect(params).toContain(5);
   });
 });
 

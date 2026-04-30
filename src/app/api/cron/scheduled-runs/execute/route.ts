@@ -4,7 +4,7 @@ import { withErrorHandler, jsonResponse } from "@/lib/api";
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { AgentRowInternal, TenantRow, ScheduleRow } from "@/lib/validation";
 import { dispatchSessionMessage } from "@/lib/dispatcher";
-import { findWarmScheduleSession } from "@/lib/sessions";
+import { findWarmScheduleSession, casActiveToIdle } from "@/lib/sessions";
 import { transitionMessageStatus } from "@/lib/session-messages";
 import { BudgetExceededError, ConcurrencyLimitError } from "@/lib/errors";
 import { getCallbackBaseUrl } from "@/lib/mcp-connections";
@@ -80,6 +80,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   }
 
   let messageId: string;
+  let sessionId: string;
   try {
     const dispatchResult = await dispatchSessionMessage({
       tenantId,
@@ -92,6 +93,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
       platformApiUrl: getCallbackBaseUrl(),
     });
     messageId = dispatchResult.messageId;
+    sessionId = dispatchResult.sessionId;
 
     // Drain the dispatcher stream so finalize hooks fire. The schedule cron
     // function instance bounds this with its 5-min maxDuration; long-running
@@ -136,6 +138,13 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         error_type: "drain_timeout",
         error_messages: ["Scheduled run drain loop hit per-read timeout (30s without bytes)."],
       }).catch(() => {});
+      // Schedule sessions are persistent (ephemeral=false). The dispatcher's
+      // finalize is bypassed when we abandon the stream, so flip the session
+      // active→idle here. Idle-TTL (300s) then stops the sandbox via the
+      // cleanup cron. Without this the row leaks in `active` forever — the
+      // active-watchdog requires a `running` message that this transition
+      // just destroyed.
+      await casActiveToIdle(sessionId, tenantId, messageId).catch(() => {});
     }
   } catch (err) {
     if (err instanceof ConcurrencyLimitError || err instanceof BudgetExceededError) {
@@ -159,13 +168,28 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // If the dispatcher stream finished but the message status is still
   // "running" (for example, the runner crashed silently), best-effort
   // transition to failed so the schedule tick doesn't leave a stuck row.
-  await transitionMessageStatus(messageId, tenantId, "running", "failed", {
-    completed_at: new Date().toISOString(),
-    error_type: "schedule_no_terminal_event",
-    error_messages: ["Scheduled run ended without terminal event"],
-  }).catch(() => {
-    // No-op when the message already finalized — this is the happy path.
-  });
+  // Track whether we actually flipped the message (vs. happy-path no-op) so
+  // we only escalate to a session-level CAS in the failure case.
+  const flippedMessage = await transitionMessageStatus(
+    messageId,
+    tenantId,
+    "running",
+    "failed",
+    {
+      completed_at: new Date().toISOString(),
+      error_type: "schedule_no_terminal_event",
+      error_messages: ["Scheduled run ended without terminal event"],
+    },
+  ).catch(() => false);
+
+  // If we just transitioned a "stuck running" message to failed, the parent
+  // session is still in `active` (the dispatcher's finalize never ran). The
+  // active-watchdog requires a running message and will skip this row, so
+  // the session would leak forever. Flip active→idle and let idle-TTL stop
+  // the sandbox on the next cleanup tick.
+  if (flippedMessage) {
+    await casActiveToIdle(sessionId, tenantId, messageId).catch(() => {});
+  }
 
   logger.info("Scheduled run completed", { schedule_id, agent_id: agent.id, message_id: messageId });
   return jsonResponse({ status: "triggered", message_id: messageId });
