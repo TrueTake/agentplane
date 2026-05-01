@@ -809,19 +809,46 @@ async function runMessageStream(
 
   let detached = false;
   async function* streamWithFinalize() {
-    for await (const line of logIterator) {
-      yield line;
+    let finalized = false;
+    const runFinalize = async () => {
+      if (finalized || detached) return;
+      finalized = true;
+      try {
+        await finalizeMessage({
+          messageId,
+          tenantId: input.tenantId,
+          session,
+          sandbox,
+          sdkSessionId: sdkSessionIdRef.value,
+          transcriptChunks,
+          effectiveBudget,
+        });
+      } catch (err) {
+        logger.error("streamWithFinalize: finalize threw, giving up", {
+          message_id: messageId,
+          session_id: session.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    try {
+      for await (const line of logIterator) {
+        yield line;
+      }
+      // Normal end-of-stream finalization. Run inside try so `finally` won't
+      // double-fire (the `finalized` guard is the source of truth).
+      await runFinalize();
+    } finally {
+      // Iterator errored, generator was abandoned mid-stream, or consumer
+      // called `.return()`. Without this, an iterator throw before the
+      // post-loop `runFinalize` swallows the message in `running` — the
+      // streaming.ts catch closes the controller cleanly so the consumer
+      // sees `{ done: true }`, the schedule cron's drain exits normally, and
+      // the message is only rescued by the outer `schedule_no_terminal_event`
+      // fallback. Finalize-via-finally narrows that to a real bug instead of
+      // the common path.
+      await runFinalize();
     }
-    if (detached) return;
-    await finalizeMessage({
-      messageId,
-      tenantId: input.tenantId,
-      session,
-      sandbox,
-      sdkSessionId: sdkSessionIdRef.value,
-      transcriptChunks,
-      effectiveBudget,
-    });
   }
 
   return createNdjsonStream({
@@ -947,6 +974,24 @@ async function finalizeMessage(args: FinalizeArgs): Promise<void> {
         },
         { expectedMaxBudgetUsd: effectiveBudget },
       );
+    } else if (!alreadyFinalized && transcriptChunks.length === 0) {
+      // The stream closed without any non-text_delta events from the runner —
+      // typically a sandbox spawn that exited before emitting `session_info`,
+      // or a runner that crashed before its first non-text_delta yield. There
+      // is no transcript to upload; mark the message failed so the schedule
+      // cron's outer `schedule_no_terminal_event` fallback isn't doing
+      // double-duty for this dispatcher gap.
+      logger.warn("finalizeMessage: stream closed with empty transcript", {
+        message_id: messageId,
+        session_id: session.id,
+      });
+      await transitionMessageStatus(messageId, tenantId, "running", "failed", {
+        completed_at: new Date().toISOString(),
+        error_type: "empty_stream",
+        error_messages: [
+          "Runner produced no non-text_delta events before the stream closed.",
+        ],
+      });
     } else if (alreadyFinalized) {
       logger.info("finalizeMessage: runner already finalized message, skipping", {
         message_id: messageId,
